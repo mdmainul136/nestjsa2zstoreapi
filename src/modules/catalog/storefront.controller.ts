@@ -14,6 +14,7 @@ import { PricingService } from '../pricing/pricing.service';
 import { CustomerService } from '../customer/customer.service';
 import { CreateReviewDto } from '../customer/dto/customer.dto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { SearchService } from '../search/search.service';
 import { runBackgroundScrape } from './scraper.util';
 
 @Controller('storefront')
@@ -25,6 +26,7 @@ export class StorefrontController {
     private readonly pricingService: PricingService,
     private readonly customerService: CustomerService,
     private readonly prisma: PrismaService,
+    private readonly searchService: SearchService,
   ) {}
 
   private async applyDynamicPricing(product: any) {
@@ -103,6 +105,39 @@ export class StorefrontController {
    */
   @Get('products')
   async getProducts(@Query() query: any) {
+    const searchTerm = (query.search || query.q || '').trim();
+
+    // ✅ যদি ইউজার কিছু সার্চ করে, তবে আমাদের পূর্ণাঙ্গ PostgreSQL GIN Trigram & BM25 Search Engine ব্যবহার করবে!
+    if (searchTerm) {
+      const searchResult: any = await this.searchService.searchProducts({
+        q: searchTerm,
+        page: query.page,
+        limit: query.limit,
+        category: query.category,
+        brand: query.brand,
+        minPrice: query.min_price || query.minPrice,
+        maxPrice: query.max_price || query.maxPrice,
+        sort: query.sort_by || query.sort,
+        inStock: query.in_stock ? String(query.in_stock) : undefined,
+      });
+
+      const itemsWithPricing = await Promise.all(
+        searchResult.items.map(async (item: any) => this.applyDynamicPricing(item)),
+      );
+
+      return {
+        success: true,
+        engine: searchResult.engine,
+        didYouMean: searchResult.didYouMean,
+        data: itemsWithPricing,
+        products: itemsWithPricing,
+        total: searchResult.total,
+        pages: searchResult.totalPages,
+        meta: searchResult,
+      };
+    }
+
+    // অন্যথায় স্ট্যান্ডার্ড ক্যাটাগরি ও স্টোরফ্রন্ট ব্রাউজিং
     const productsData = await this.catalogService.getStorefrontProducts({
       page: query.page,
       limit: query.limit,
@@ -113,7 +148,7 @@ export class StorefrontController {
       minPrice: query.min_price || query.minPrice,
       maxPrice: query.max_price || query.maxPrice,
       sort: query.sort_by || query.sort,
-      search: query.search || query.q,
+      search: searchTerm,
       has_discount: query.has_discount || query.deal,
     });
     const itemsWithPricing = await Promise.all(

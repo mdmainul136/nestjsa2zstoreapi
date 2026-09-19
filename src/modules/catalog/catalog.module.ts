@@ -14,6 +14,7 @@ import { MediaModule } from '../media/media.module';
 
 import { PrismaModule } from '../../prisma/prisma.module';
 import { QueueModule } from '../queue/queue.module';
+import { SearchModule } from '../search/search.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { QueueModule } from '../queue/queue.module';
     AiModule,
     MediaModule,
     forwardRef(() => QueueModule),
+    SearchModule,
   ],
   controllers: [CatalogController, StorefrontController, SchedulesController],
   providers: [CatalogService],
