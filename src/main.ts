@@ -99,8 +99,14 @@ async function bootstrap() {
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
 
-  // ✅ useGlobalPrefix: false নিশ্চিত করুন যেন এটি সরাসরি /docs এ পায়
+  // ✅ Setup Swagger on both /docs and /api/docs
   SwaggerModule.setup('docs', app, document, {
+    useGlobalPrefix: false,
+    swaggerOptions: {
+      persistAuthorization: true,
+    },
+  });
+  SwaggerModule.setup('api/docs', app, document, {
     useGlobalPrefix: false,
     swaggerOptions: {
       persistAuthorization: true,

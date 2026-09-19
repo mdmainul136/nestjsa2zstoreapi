@@ -57,7 +57,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=dokploy-network"
-      - "traefik.http.routers.a2z-api.rule=Host(`api.a2zoutletstore.com`)"
+      - "traefik.http.routers.a2z-api.rule=Host(`nestapi.a2zoutletstore.com`) || Host(`api.a2zoutletstore.com`)"
       - "traefik.http.routers.a2z-api.entrypoints=websecure"
       - "traefik.http.routers.a2z-api.tls.certresolver=letsencrypt"
       - "traefik.http.routers.a2z-api.service=a2z-api-svc"
