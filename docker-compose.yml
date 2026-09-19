@@ -1,7 +1,13 @@
 version: '3.8'
 
+# ==============================================================================
+# SERVICE: NestJS Backend API (Independent Service)
+# Repository: https://github.com/mdmainul136/nestjsa2zstoreapi
+# Domain: https://api.a2zoutletstore.com
+# Port: 5001
+# ==============================================================================
+
 services:
-  # ─── 1. Backend API (NestJS) ───
   api:
     build:
       context: .
@@ -10,24 +16,24 @@ services:
     container_name: a2z-api
     restart: unless-stopped
     ports:
-      - "5001:5001"
+      - "${PORT:-5001}:5001"
     environment:
       - NODE_ENV=production
       - PORT=5001
       - APP_ENV=production
-      - APP_URL=https://api.a2zoutletstore.com
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-a2zstore2026a}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-a2zstore}?schema=public
+      - APP_URL=${APP_URL:-https://api.a2zoutletstore.com}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:a2zstore2026a@postgres:5432/a2zstore?schema=public}
       - REDIS_HOST=${REDIS_HOST:-redis}
       - REDIS_PORT=${REDIS_PORT:-6379}
       - JWT_SECRET=${JWT_SECRET:-ffe7d1856163b3df17e5437920ee10453f5b83d30c62a48a0d5554923d608d6e}
-      - JWT_EXPIRES_IN=7d
-      - ALLOWED_ORIGINS=https://a2zoutletstore.com,https://www.a2zoutletstore.com,https://admin.a2zoutletstore.com,https://dashboard.a2zoutletstore.com,http://localhost:3000,http://localhost:3001
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-7d}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-https://a2zoutletstore.com,https://www.a2zoutletstore.com,https://admin.a2zoutletstore.com,https://dashboard.a2zoutletstore.com,http://localhost:3000,http://localhost:3001}
       - UDDOKTAPAY_BASE_URL=${UDDOKTAPAY_BASE_URL:-https://sandbox.uddoktapay.com/}
       - UDDOKTAPAY_API_KEY=${UDDOKTAPAY_API_KEY:-982d381360a69d419689740d9f2e26ce36fb7a50}
     volumes:
       - uploads_data:/app/uploads
     networks:
-      - a2z-network
+      - default
       - dokploy-network
     labels:
       - "traefik.enable=true"
@@ -38,75 +44,10 @@ services:
       - "traefik.http.routers.a2z-api.service=a2z-api-svc"
       - "traefik.http.services.a2z-api-svc.loadbalancer.server.port=5001"
 
-  # ─── 2. Admin Dashboard (Next.js 16) ───
-  admin-dashboard:
-    build:
-      context: ./admin-dashboard
-      dockerfile: Dockerfile
-      args:
-        - NEXT_PUBLIC_API_URL=https://api.a2zoutletstore.com/api
-    image: a2z-admin-dashboard:latest
-    container_name: a2z-admin-dashboard
-    restart: unless-stopped
-    ports:
-      - "3001:3001"
-    environment:
-      - NODE_ENV=production
-      - PORT=3001
-      - NEXT_PUBLIC_API_URL=https://api.a2zoutletstore.com/api
-    depends_on:
-      - api
-    networks:
-      - a2z-network
-      - dokploy-network
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=dokploy-network"
-      - "traefik.http.routers.a2z-admin.rule=Host(`admin.a2zoutletstore.com`) || Host(`dashboard.a2zoutletstore.com`)"
-      - "traefik.http.routers.a2z-admin.entrypoints=websecure"
-      - "traefik.http.routers.a2z-admin.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.a2z-admin.service=a2z-admin-svc"
-      - "traefik.http.services.a2z-admin-svc.loadbalancer.server.port=3001"
-
-  # ─── 3. Storefront Ecommerce (Next.js Public Site) ───
-  storefront:
-    build:
-      context: ./ecommerce
-      dockerfile: Dockerfile
-      args:
-        - NEXT_PUBLIC_SITE_URL=https://a2zoutletstore.com
-        - SCRAPER_API_URL=http://api:5001
-    image: a2z-storefront:latest
-    container_name: a2z-storefront
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    environment:
-      - NODE_ENV=production
-      - PORT=3000
-      - SCRAPER_API_URL=http://api:5001
-      - NEXT_PUBLIC_API_URL=/api
-      - NEXT_PUBLIC_SITE_URL=https://a2zoutletstore.com
-    depends_on:
-      - api
-    networks:
-      - a2z-network
-      - dokploy-network
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=dokploy-network"
-      - "traefik.http.routers.a2z-store.rule=Host(`a2zoutletstore.com`) || Host(`www.a2zoutletstore.com`)"
-      - "traefik.http.routers.a2z-store.entrypoints=websecure"
-      - "traefik.http.routers.a2z-store.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.a2z-store.service=a2z-store-svc"
-      - "traefik.http.services.a2z-store-svc.loadbalancer.server.port=3000"
-
 volumes:
   uploads_data:
     driver: local
 
 networks:
-  a2z-network:
-    driver: bridge
   dokploy-network:
     external: true

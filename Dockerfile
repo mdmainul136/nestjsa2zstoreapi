@@ -7,6 +7,7 @@ WORKDIR /app
 RUN apk add --no-cache openssl libc6-compat
 
 COPY package*.json ./
+COPY prisma.config.ts ./
 COPY prisma ./prisma/
 
 # Install all dependencies (including devDependencies for build)
@@ -38,6 +39,7 @@ RUN apk add --no-cache openssl libc6-compat curl
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/prisma.config.ts ./
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 
