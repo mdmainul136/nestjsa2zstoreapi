@@ -1116,12 +1116,38 @@ export class CatalogService {
         ],
       };
     }
-    if (query.source) where.source = query.source;
     if (query.search) {
-      where.OR = [
-        { title: { contains: query.search, mode: 'insensitive' } },
-        { description: { contains: query.search, mode: 'insensitive' } },
-      ];
+      const searchTerm = query.search.trim();
+
+      // ১. সার্চ টার্মটি কি কোনো পরিচিত ব্র্যান্ডের সাথে হুবহু মিলে যায়? (যেমন 'mac' -> Brand 'MAC')
+      const matchedBrand = await this.prisma.brand.findFirst({
+        where: {
+          OR: [
+            { name: { equals: searchTerm, mode: 'insensitive' } },
+            { slug: { equals: searchTerm.toLowerCase() } },
+          ],
+        },
+        select: { id: true, name: true },
+      });
+
+      if (matchedBrand && !query.brand) {
+        // যদি ইউজার সরাসরি কোনো ব্র্যান্ডের নাম লিখে সার্চ করে (যেমন 'mac', 'dove', 'cerave')
+        // তবে সেই নির্দিষ্ট ব্র্যান্ডের সব প্রোডাক্ট দেখাবে
+        where.brandId = matchedBrand.id;
+      } else {
+        const searchConditions: any[] = [
+          { title: { contains: searchTerm, mode: 'insensitive' } },
+          { brand: { name: { contains: searchTerm, mode: 'insensitive' } } },
+          { category: { name: { contains: searchTerm, mode: 'insensitive' } } },
+        ];
+
+        // ৩ অক্ষরের কম বা সমান শব্দ হলে ডেসক্রিপশনে সাবস্ট্রিং সার্চ বন্ধ রাখুন (যাতে stomach বা pharmaceutical এ 'mac' ম্যাচ না করে)
+        if (searchTerm.length > 3) {
+          searchConditions.push({ description: { contains: searchTerm, mode: 'insensitive' } });
+        }
+
+        where.OR = searchConditions;
+      }
     }
     if (query.minPrice || query.maxPrice) {
       where.sellingPrice = {};
