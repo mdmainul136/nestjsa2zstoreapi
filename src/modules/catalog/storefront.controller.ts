@@ -100,6 +100,57 @@ export class StorefrontController {
   }
 
   /**
+   * ২.১. লাইভ কারেন্সি লিস্ট ও এক্সচেঞ্জ রেট
+   * GET /storefront/currencies
+   */
+  @Get('currencies')
+  async getCurrencies() {
+    return {
+      success: true,
+      currencies: [
+        { code: 'BDT', symbol: '৳', base_rate: 1.0, effective_rate: 1.0, name: 'Bangladeshi Taka', flag: 'bd' },
+        { code: 'USD', symbol: '$', base_rate: 122.0, effective_rate: 122.0, name: 'US Dollar', flag: 'us' },
+        { code: 'AED', symbol: 'د.إ', base_rate: 33.2, effective_rate: 33.2, name: 'UAE Dirham', flag: 'ae' },
+        { code: 'GBP', symbol: '£', base_rate: 155.0, effective_rate: 155.0, name: 'British Pound', flag: 'gb' },
+        { code: 'EUR', symbol: '€', base_rate: 132.0, effective_rate: 132.0, name: 'Euro', flag: 'eu' },
+      ],
+    };
+  }
+
+  /**
+   * ২.২. ওয়্যারহাউস ফ্লাইট শিডিউল ও ডেলিভারি নোটিশ
+   * GET /storefront/warehouse-schedules
+   */
+  @Get('warehouse-schedules')
+  async getWarehouseSchedules() {
+    return {
+      success: true,
+      schedules: [
+        {
+          id: 'us-hub',
+          name: 'USA JFK Air Cargo Hub',
+          country: 'USA',
+          city: 'New York',
+          shipment_frequency: 'Weekly (Every Thu)',
+          shipment_day: 'Thursday',
+          shipment_notice: 'Air freight cargo cutoff every Wednesday 5 PM EST',
+          next_shipment_date: 'This Thursday',
+        },
+        {
+          id: 'cn-hub',
+          name: 'China Guangzhou Air Hub',
+          country: 'China',
+          city: 'Guangzhou',
+          shipment_frequency: 'Twice a week (Tue & Fri)',
+          shipment_day: 'Tuesday, Friday',
+          shipment_notice: 'Air express departure every Tuesday & Friday',
+          next_shipment_date: 'This Tuesday',
+        },
+      ],
+    };
+  }
+
+  /**
    * ৩. স্টোরফ্রন্ট ক্যাটালগ প্রডাক্টস (ফিল্টারিং, সার্চ ও পেজিনেশন)
    * GET /storefront/products
    */

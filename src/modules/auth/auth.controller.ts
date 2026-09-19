@@ -70,4 +70,14 @@ export class AuthController {
     return this.authService.getMe(userId);
   }
 
+  @ApiOperation({ summary: 'Auth configuration and provider info' })
+  @Get('config')
+  async getAuthConfig() {
+    return {
+      success: true,
+      authProviders: ['credentials', 'otp'],
+      registrationEnabled: true,
+      otpEnabled: true,
+    };
+  }
 }
