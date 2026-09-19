@@ -1,5 +1,6 @@
 import { Controller, Post, Get, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -17,18 +18,21 @@ export class AuthController {
   constructor(private readonly authService: AuthService) { }
 
   @ApiOperation({ summary: 'Create new customer' })
+  @Throttle({ short: { limit: 5, ttl: 60000 }, long: { limit: 15, ttl: 900000 } })
   @Post('register')
   async register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
   }
 
   @ApiOperation({ summary: 'Login with email and password' })
+  @Throttle({ short: { limit: 8, ttl: 60000 }, long: { limit: 20, ttl: 900000 } })
   @Post('login')
   async login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
   }
 
   @ApiOperation({ summary: 'Verify email address' })
+  @Throttle({ short: { limit: 5, ttl: 60000 }, long: { limit: 15, ttl: 900000 } })
   @Post('verify-email')
   async verifyEmail(@Body() dto: VerifyEmailDto) {
     return this.authService.verifyEmail(dto);

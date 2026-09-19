@@ -21,11 +21,31 @@ import { NbrModule } from './modules/nbr/nbr.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { QueueModule } from './modules/queue/queue.module';
 
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    ThrottlerModule.forRoot([
+      {
+        name: 'short',
+        ttl: 1000,
+        limit: 25, // 25 requests per second burst limit
+      },
+      {
+        name: 'medium',
+        ttl: 10000,
+        limit: 150, // 150 requests per 10 seconds
+      },
+      {
+        name: 'long',
+        ttl: 60000,
+        limit: 500, // 500 requests per minute
+      },
+    ]),
     AuthModule,
     MailModule,
     PrismaModule,
@@ -46,7 +66,13 @@ import { QueueModule } from './modules/queue/queue.module';
     QueueModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}
 

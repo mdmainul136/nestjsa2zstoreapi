@@ -82,13 +82,45 @@ async function bootstrap() {
     done();
   });
 
+  // Security Headers Hook (Protection against XSS, Clickjacking, MIME-sniffing, Information Leakage)
+  fastifyInstance.addHook('onSend', async (_request: any, reply: any) => {
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('X-Frame-Options', 'SAMEORIGIN');
+    reply.header('X-XSS-Protection', '1; mode=block');
+    reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+    reply.removeHeader('x-powered-by');
+  });
+
   // API Prefix
   app.setGlobalPrefix('api');
 
-  // CORS
+  // Hardened Domain-Restricted CORS
+  const allowedOriginsStr = process.env.ALLOWED_ORIGINS || '';
+  const allowedOrigins = allowedOriginsStr
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   app.enableCors({
-    origin: '*',
-    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE'],
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (origin.startsWith('chrome-extension://')) return callback(null, true);
+      if (
+        allowedOrigins.length === 0 ||
+        allowedOrigins.includes(origin) ||
+        origin.endsWith('.a2zoutletstore.com') ||
+        origin === 'https://a2zoutletstore.com' ||
+        origin.includes('localhost') ||
+        origin.includes('127.0.0.1')
+      ) {
+        return callback(null, true);
+      }
+      return callback(new Error(`Origin ${origin} blocked by CORS security policy`), false);
+    },
+    credentials: true,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'X-Requested-With', 'Accept'],
   });
 
   // Global Validation
