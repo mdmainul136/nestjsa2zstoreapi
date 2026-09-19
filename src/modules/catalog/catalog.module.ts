@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { PassportModule } from '@nestjs/passport';
 import { CatalogController } from './catalog.controller';
 import { StorefrontController } from './storefront.controller';
@@ -13,6 +13,7 @@ import { AuthModule } from '../auth/auth.module';
 import { MediaModule } from '../media/media.module';
 
 import { PrismaModule } from '../../prisma/prisma.module';
+import { QueueModule } from '../queue/queue.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { PrismaModule } from '../../prisma/prisma.module';
     CustomerModule,
     AiModule,
     MediaModule,
+    forwardRef(() => QueueModule),
   ],
   controllers: [CatalogController, StorefrontController, SchedulesController],
   providers: [CatalogService],

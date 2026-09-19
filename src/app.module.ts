@@ -19,6 +19,7 @@ import { MediaModule } from './modules/media/media.module';
 import { CompetitorModule } from './modules/competitor/competitor.module';
 import { NbrModule } from './modules/nbr/nbr.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { QueueModule } from './modules/queue/queue.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
     CompetitorModule,
     NbrModule,
     PaymentsModule,
+    QueueModule,
   ],
   controllers: [AppController],
   providers: [AppService],

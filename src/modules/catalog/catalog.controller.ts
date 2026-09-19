@@ -26,6 +26,9 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 
 
+import { QueueService } from '../queue/queue.service';
+import { Inject, forwardRef } from '@nestjs/common';
+
 @ApiTags('Catalog')
 @Controller('catalog')
 export class CatalogController {
@@ -33,18 +36,38 @@ export class CatalogController {
     private readonly catalogService: CatalogService,
     private readonly prisma: PrismaService,
     private readonly pricingService: PricingService,
+    @Inject(forwardRef(() => QueueService))
+    private readonly queueService: QueueService,
   ) { }
 
   /**
    * ক্রোম এক্সটেনশন সিঙ্ক এন্ডপয়েন্ট: POST /catalog/extension/sync
+   * ?async=true দিলে BullMQ কিউতে ব্যাকগ্রাউন্ডে প্রসেস হবে
    */
-  @ApiOperation({ summary: 'ক্রোম এক্সটেনশন সিঙ্ক' })
+  @ApiOperation({ summary: 'ক্রোম এক্সটেনশন সিঙ্ক (BullMQ ব্যাকগ্রাউন্ড সাপোর্ট সহ)' })
   @ApiSecurity('x-api-key')
   @UseGuards(ApiKeyGuard)
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: false }))
   @Post('extension/sync')
-  async syncFromExtension(@Body() payload: ExtensionSyncDto) {
+  async syncFromExtension(
+    @Body() payload: ExtensionSyncDto,
+    @Query('async') asyncMode?: string,
+  ) {
+    if (asyncMode === 'true' || asyncMode === '1') {
+      return this.queueService.addScrapeSyncJob(payload);
+    }
     return this.catalogService.syncFromExtension(payload);
+  }
+
+  /**
+   * ক্রোম এক্সটেনশন বাল্ক ব্যাকগ্রাউন্ড সিঙ্ক: POST /catalog/extension/sync-bulk
+   */
+  @ApiOperation({ summary: 'ক্রোম এক্সটেনশন বাল্ক ব্যাকগ্রাউন্ড সিঙ্ক (BullMQ)' })
+  @ApiSecurity('x-api-key')
+  @UseGuards(ApiKeyGuard)
+  @Post('extension/sync-bulk')
+  async syncBulkFromExtension(@Body() items: ExtensionSyncDto[]) {
+    return this.queueService.addBulkScrapeJobs(Array.isArray(items) ? items : [items]);
   }
 
   @ApiOperation({ summary: 'ক্রোম এক্সটেনশন কানেকশন ও কি ভ্যালিডেশন টেস্ট' })

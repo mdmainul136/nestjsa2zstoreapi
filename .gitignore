@@ -50,6 +50,8 @@ scratch/
 
 # Large database dumps & backups
 *.sql
+*.sql.gz
+*.gz
 *.bson
 backupserver/
 uploads/

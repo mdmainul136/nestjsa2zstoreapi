@@ -34,6 +34,8 @@ services:
     networks:
       - default
       - dokploy-network
+    depends_on:
+      - redis
     deploy:
       mode: replicated
       replicas: 2
@@ -67,8 +69,20 @@ services:
       - "traefik.http.services.a2z-api-svc.loadbalancer.healthcheck.interval=10s"
       - "traefik.http.services.a2z-api-svc.loadbalancer.healthcheck.timeout=3s"
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - default
+      - dokploy-network
+
 volumes:
   uploads_data:
+    driver: local
+  redis_data:
     driver: local
 
 networks:
