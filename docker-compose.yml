@@ -1,10 +1,13 @@
 version: '3.8'
 
 # ==============================================================================
-# Independent Standalone Stack for NestJS A2Z Store API
-# Repository: https://github.com/mdmainul136/nestjsa2zstoreapi
-# Public API Domain: https://api.a2zoutletstore.com
-# Port: 5001
+# High-Availability Load Balanced Stack for NestJS A2Z Store API
+# Features:
+#   - Replicated auto-scalable instances (replicas: 2+)
+#   - Traefik Dynamic Round-Robin Load Balancing with Active Healthchecks
+#   - Zero-Downtime Rolling Deployments (start-first)
+#   - Shared Persistent Storage for Uploads across all replicas
+#   - Resource limits (CPU/Memory) & automatic restart policies
 # ==============================================================================
 
 services:
@@ -13,10 +16,9 @@ services:
       context: .
       dockerfile: Dockerfile
     image: a2z-api:latest
-    container_name: a2z-api
     restart: unless-stopped
-    ports:
-      - "${PORT:-5001}:5001"
+    expose:
+      - "5001"
     environment:
       - NODE_ENV=production
       - PORT=5001
@@ -32,14 +34,48 @@ services:
       - UDDOKTAPAY_API_KEY=${UDDOKTAPAY_API_KEY:-982d381360a69d419689740d9f2e26ce36fb7a50}
     volumes:
       - uploads_data:/app/uploads
+    networks:
+      - default
+      - dokploy-network
+    deploy:
+      mode: replicated
+      replicas: 2
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1536M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=dokploy-network"
       - "traefik.http.routers.a2z-api.rule=Host(`api.a2zoutletstore.com`)"
       - "traefik.http.routers.a2z-api.entrypoints=websecure"
       - "traefik.http.routers.a2z-api.tls.certresolver=letsencrypt"
       - "traefik.http.routers.a2z-api.service=a2z-api-svc"
       - "traefik.http.services.a2z-api-svc.loadbalancer.server.port=5001"
+      - "traefik.http.services.a2z-api-svc.loadbalancer.passhostheader=true"
+      - "traefik.http.services.a2z-api-svc.loadbalancer.healthcheck.path=/"
+      - "traefik.http.services.a2z-api-svc.loadbalancer.healthcheck.interval=10s"
+      - "traefik.http.services.a2z-api-svc.loadbalancer.healthcheck.timeout=3s"
 
 volumes:
   uploads_data:
     driver: local
+
+networks:
+  default:
+    driver: bridge
+  dokploy-network:
+    external: true
