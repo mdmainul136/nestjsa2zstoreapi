@@ -1,0 +1,238 @@
+// ─────────────────────────────────────────────────────────────
+// SCRAPER ENGINE, PROXY POOL, EXTENSION SYNC & COMPETITOR TRACKING
+// ─────────────────────────────────────────────────────────────
+
+// ─── ১. শিডিউলড অটোমেটিক স্ক্র্যাপিং জবস (Cron Jobs) ───
+model ScheduledJob {
+  id             String        @id @default(uuid())
+  name           String        // e.g. "Daily Amazon Electronics Scraper"
+  source         String        @default("amazon") // amazon, walmart, sephora, nike
+  inputType      String        @default("url") // url, category, asin_list
+  inputValue     String        @db.Text
+  frequency      FrequencyType @default(DAILY) // DAILY, WEEKLY, MONTHLY
+  runTime        String        @default("02:00") // রাত ২টায় রান হবে
+
+  isActive       Boolean       @default(true)
+  webhookUrl     String?       // স্ক্র্যাপ শেষ হলে নোটিফিকেশন ইউআরএল
+  deliveryType   String        @default("api")
+  deliveryConfig Json?
+
+  lastRunAt      DateTime?
+  nextRunAt      DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+// ─── ২. লাইভ স্ক্র্যাপিং সেশন ও এক্সটেনশন সিঙ্ক ট্র্যাকার ───
+model ScrapeSession {
+  id           String    @id @default(uuid())
+  source       String    // "amazon", "walmart", "sephora", "nike", "extension"
+  targetUrl    String    @db.Text
+  status       String    @default("running") // "running", "completed", "failed"
+
+  itemsFound   Int       @default(0) // মোট কতটি আইটেম পেজে পাওয়া গেছে
+  itemsScraped Int       @default(0) // সফলভাবে স্ক্র্যাপ হয়েছে
+  itemsSaved   Int       @default(0) // ডাটাবেসে সেভ হয়েছে
+
+  durationMs   Int?      // মোট কত মিলিসেকেন্ড সময় লেগেছে
+  errorMessage String?   @db.Text
+
+  startedAt    DateTime  @default(now())
+  completedAt  DateTime?
+
+  @@index([source])
+  @@index([status])
+}
+
+// ─── ৩. কম্পিটিটর প্রাইস ও স্টক ট্র্যাকার (Competitor Intelligence) ───
+model CompetitorTracker {
+  id               String    @id @default(uuid())
+  productTitle     String
+  source           String    // "amazon", "walmart", "ebay", "sephora"
+  productUrl       String    @db.Text
+  marketplaceId    String?   // ASIN or Walmart Item ID
+
+  currentPrice     Float     // বর্তমান দাম (USD)
+  previousPrice    Float?    // আগের দাম
+  targetAlertPrice Float?    // দাম কত নিচে নামলে এলার্ট দেবে
+
+  availability     String    @default("In Stock") // "In Stock" | "Out of Stock"
+  alertTriggered   Boolean   @default(false)
+  lastCheckedAt    DateTime  @default(now())
+
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([source])
+  @@index([marketplaceId])
+}
+
+// ─── ৪. ওমনি-চ্যানেল এক্সপোর্ট (Shopify / WooCommerce Sync Profile) ───
+model ChannelProfile {
+  id           String           @id @default(uuid())
+  name         String           // e.g. "My Shopify US Dropship Store"
+  platform     String           // "shopify" | "woocommerce"
+  storeUrl     String?          // e.g. "mystore.myshopify.com"
+  apiKey       String?          // Access Token
+  apiSecret    String?          // Secret Key
+
+  marginType   String           @default("percentage") // "percentage" | "fixed"
+  marginValue  Float            @default(15.0) // ১৫% প্রফিট যোগ করে সিঙ্ক হবে
+
+  status       String           @default("active") // "active" | "paused" | "archived"
+  syncLogs     ChannelSyncLog[]
+
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+}
+
+model ChannelSyncLog {
+  id           String         @id @default(uuid())
+  channelId    String
+  channel      ChannelProfile @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  productTitle String
+  status       String         // "SUCCESS" | "FAILED"
+  syncedPrice  Float?
+  errorMessage String?        @db.Text
+
+  timestamp    DateTime       @default(now())
+
+  @@index([channelId])
+  @@index([status])
+}
+
+// ─── ৫. আমাজন ব্রাউজ নোড ক্যাটাগরি ট্রি ───
+model AmazonBrowseNode {
+  id         String   @id @default(uuid())
+  nodeId     String   @unique // e.g. "172282"
+  name       String   // e.g. "Electronics"
+  path       String?  // e.g. "Electronics > Audio > Headphones"
+  parentCode String?
+  isLeaf     Boolean  @default(false)
+  itemCount  Int      @default(0)
+
+  updatedAt  DateTime @default(now()) @updatedAt
+
+  @@index([nodeId])
+  @@index([parentCode])
+}
+
+// ─── ৬. আইপি প্রক্সি পুল ও রোটেশন ম্যানেজার ───
+model Proxy {
+  id                  String    @id @default(uuid())
+  url                 String    @unique // e.g. "http://user:pass@ip:port"
+  tier                String    @default("datacenter") // datacenter, residential, mobile
+  country             String    @default("US")
+  provider            String    @default("Webshare") // Webshare, BrightData, Oxylabs
+
+  isActive            Boolean   @default(true)
+  latencyMs           Int?      // পিং রেসপন্স টাইম (e.g. 120ms)
+  totalScrapes        Int       @default(0)
+  successRate         Float     @default(100.0) // সাফল্যের হার
+
+  bandwidthUsedBytes  BigInt    @default(0)
+  bandwidthLimitBytes BigInt?
+
+  lastPingAt          DateTime?
+  createdAt           DateTime  @default(now())
+
+  @@index([isActive])
+  @@index([country])
+}
+
+// ─── ৭. ডিস্ট্রিবিউটেড স্ক্র্যাপার ভিপিএস ওয়ার্কার নোডস ───
+model WorkerNode {
+  id                 String    @id @default(uuid())
+  name               String    @default("My Scraper VPS")
+  tokenHash          String    @unique
+  publicIp           String?
+  agentPort          Int       @default(7700)
+
+  maxSessions        Int       @default(5)
+  activeSessions     Int       @default(0)
+
+  cpu                String    @default("2.0")
+  mem                String    @default("3G")
+  status             String    @default("pending") // pending, online, offline
+  browserlessHealthy Boolean   @default(false)
+  cpuPercent         Float     @default(0.0)
+  ramPercent         Float     @default(0.0)
+
+  lastSeen           DateTime?
+  createdAt          DateTime  @default(now())
+}
+
+// ─── ৮. প্ল্যাটফর্মের সেন্ট্রাল সেটিংস ───
+model PlatformSetting {
+  key       String   @id // e.g. "MIN_SCRAPE_INTERVAL", "DEFAULT_CURRENCY"
+  value     String   @db.Text
+  updatedAt DateTime @default(now()) @updatedAt
+}
+
+// ─── ৯. বাল্ক প্রোডাক্ট আপলোড ও ব্যাচ ইমপোর্ট ───
+model BatchJob {
+  id             String    @id @default(uuid())
+  batchId        String    @unique // e.g. "BATCH-2026-001"
+  inputFileId    String    // আপলোড করা CSV/Excel
+  outputFileId   String?
+  status         String    @default("validating") // validating, processing, completed, failed
+
+  targetBrand    String?
+  targetCategory String?
+
+  productsCount  Int       @default(0)
+  completedCount Int       @default(0)
+  failedCount    Int       @default(0)
+  errorMessage   String?
+
+  createdAt      DateTime  @default(now())
+  completedAt    DateTime?
+}
+
+// ─── ১০. আনপ্রসেসড র স্ক্র্যাপড আইটেমস (MongoDB বিকল্প সিঙ্গেল ডিবি স্টোরেজ) ───
+model RawScrapedItem {
+  id           String    @id @default(uuid())
+  externalId   String?   @unique // e.g. Amazon ASIN or Walmart Item ID or Mongo _id
+  source       String    // "amazon" | "walmart" | "sephora" | "nike"
+  title        String?
+  url          String?   @db.Text
+  priceRaw     String?
+  priceParsed  Float?
+  brand        String?
+  category     String?
+  rawData      Json      // সম্পূর্ণ স্ক্র্যাপ করা আনস্ট্রাকচার্ড JSON পেলোড
+  status       String    @default("scraped") // "scraped" | "enriched" | "published" | "ignored"
+  scrapedAt    DateTime  @default(now())
+
+  @@index([source])
+  @@index([externalId])
+  @@index([status])
+}
+
+// ─── ১১. স্ক্র্যাপার ব্যাকগ্রাউন্ড কিউ জবস (MongoDB jobs কালেকশন) ───
+model ScraperQueueJob {
+  id          String    @id @default(uuid())
+  jobId       String?   @unique
+  source      String?
+  status      String    @default("pending")
+  error       String?   @db.Text
+  data        Json?
+  result      Json?
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@index([status])
+}
+
+// ─── ১২. স্ক্র্যাপার ডেড লেটার কিউ (MongoDB dead_letter_queue কালেকশন) ───
+model DeadLetterQueue {
+  id        String   @id @default(uuid())
+  jobId     String?
+  error     String?  @db.Text
+  failedAt  DateTime @default(now())
+
+  @@index([jobId])
+}
+
+

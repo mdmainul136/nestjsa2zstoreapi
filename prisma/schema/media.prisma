@@ -1,0 +1,56 @@
+// ─────────────────────────────────────────────────────────────
+// ENTERPRISE MEDIA LIBRARY, FOLDERS, CLOUDFLARE R2/S3 STORAGE & TAGS
+// ─────────────────────────────────────────────────────────────
+
+// ─── ১. মিডিয়া ফোল্ডার হায়ারার্কি (Nested Folders) ───
+model MediaFolder {
+  id         String        @id @default(uuid())
+  name       String        // e.g. "Banners", "Products", "Blog-Images"
+  slug       String        @unique
+
+  parentId   String?
+  parent     MediaFolder?  @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children   MediaFolder[] @relation("FolderHierarchy")
+
+  files      MediaFile[]
+
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@index([parentId])
+}
+
+// ─── ২. মিডিয়া ফাইলস ও অ্যাসেটস ───
+model MediaFile {
+  id              String       @id @default(uuid())
+
+  folderId        String?
+  folder          MediaFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+
+  fileName        String       // e.g. "iphone-15-pro-banner-2026.webp"
+  originalName    String       // e.g. "photo_unboxing.png"
+  fileUrl         String       // মূল ফাইলের CDN লিংক
+  storageProvider String       @default("s3") // "s3", "cloudinary", "cloudflare_r2", "local"
+
+  mimeType        String       // "image/webp", "image/png", "video/mp4", "application/pdf"
+  fileSizeKb      Int          // ফাইলের সাইজ
+  width           Int?         // ছবির প্রস্থ (px)
+  height          Int?         // ছবির উচ্চতা (px)
+
+  // রেসপন্সিভ অপ্টিমাইজড ভ্যারিয়েন্টস (মোবাইলে দ্রুত লোড করার জন্য)
+  thumbnailUrl    String?      // ১৫০x১৫০ থাম্বনেইল
+  mediumUrl       String?      // ৬০০x৬০০ ইমেজ
+
+  // এসইও ও মেটাডাটা
+  altText         String?      // Google SEO Alt Tag
+  caption         String?
+  description     String?      @db.Text
+  tags            String[]     @default([]) // e.g. ["hero", "electronics", "banner"]
+
+  uploadedBy      String?      // যে অ্যাডমিন আপলোড করেছে
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([folderId])
+  @@index([mimeType])
+}

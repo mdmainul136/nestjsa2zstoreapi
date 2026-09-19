@@ -1,0 +1,45 @@
+// ─────────────────────────────────────────────────────────────
+// BRAND, SMART ALIASES & SCRAPED BRAND MAPPINGS
+// ─────────────────────────────────────────────────────────────
+
+model Brand {
+  id          String    @id @default(uuid())
+  name        String    @unique // e.g. "Apple", "Nike", "Sony"
+  slug        String    @unique // e.g. "apple"
+
+  // ─── স্মার্ট অ্যালিয়াস ও ফাজি ম্যাচিং ───
+  aliases     String[]  @default([]) // e.g. ["Apple Inc", "Apple Computer", "Apple US"]
+
+  logoUrl     String?   // ব্র্যান্ড লোগো
+  website     String?   // অফিসিয়াল ওয়েবসাইট
+  description String?   @db.Text
+  isFeatured  Boolean   @default(false) // হোমপেজে টপ ব্র্যান্ড ক্যারোসেলে শো করবে কি না
+
+  // ─── রিলেশনশিপসমূহ ───
+  products    Product[] // এই ব্র্যান্ডের সব প্রোডাক্ট
+  seo         SeoMetadata? // 👉 SEO রিলেশন
+  coupons     Coupon[]            // 👉 এই ব্র্যান্ডের জন্য স্পেশাল কুপন কোড
+  banners     Banner[]            // 👉 এই ব্র্যান্ডের স্পেশাল ব্যানার
+  flashSales  FlashSaleCampaign[] // 👉 এই ব্র্যান্ডের সুপার ব্র্যান্ড ডে ফ্ল্যাশ সেল
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([slug])
+}
+
+model ScrapedBrandMapping {
+  id          String   @id @default(uuid())
+  rawBrand    String   // স্ক্র্যাপ হয়ে আসা কাঁচা নাম (e.g. "Apple Inc.")
+  source      String   // amazon, walmart, sephora
+  mappedBrand String?  // আমাদের ক্লিন ব্র্যান্ডের নাম (e.g. "Apple")
+  logoUrl     String?
+  isPublished Boolean  @default(true)
+  isManual    Boolean  @default(true)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([source, rawBrand])
+  @@index([rawBrand])
+  @@index([source])
+}

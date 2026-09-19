@@ -1,0 +1,173 @@
+
+// ─────────────────────────────────────────────────────────────
+// 2. USER, ROLES & SECURITY
+// ─────────────────────────────────────────────────────────────
+model User {
+  id                     String                @id @default(uuid())
+  email                  String                @unique
+  password               String                // bcrypt hashed
+  name                   String?
+  phone                  String?
+  avatarUrl              String?
+  address                String?               @db.Text
+  role                   Role                  @default(CUSTOMER)
+  referredByCode         String?  // কে রেফার করেছে
+  referralCode           String?  @unique // নিজের রেফারেল কোড (শেয়ার করার জন্য)
+  isAdmin                Boolean               @default(false)
+  isActive               Boolean               @default(true)
+  isVerified             Boolean               @default(false)
+
+  // 2FA Security
+  twoFactorEnabled       Boolean               @default(false)
+  twoFactorSecret        String?
+
+  // Verification & Reset Tokens
+  verificationToken      String?
+  verificationExpiresAt  DateTime?
+  passwordResetToken     String?
+  passwordResetExpiresAt DateTime?
+
+
+  // Relationships
+  orders                 Order[]
+  reviews                ProductReview[]
+  wishlist               WishlistItem[]
+  priceAlerts            CustomerPriceAlert[]
+  affiliateProfile       AffiliateProfile?
+  auditLogs              AuditLog[]
+  // 👉 এই ২টি মার্কেটিং রিলেশন যোগ করুন:
+  loyaltyRewards         LoyaltyReward[]       // কাস্টমারের লয়্যালটি ও ক্যাশব্যাক পয়েন্ট
+  couponUsages           CouponUsage[]         // কাস্টমারের কুপন ব্যবহারের হিস্ট্রি
+  productRequests        ProductRequest[]
+  quotationRequests      QuotationRequest[]
+  // 👉 এই ২টি নতুন রিলেশন:
+  addresses              UserAddress[]         // কাস্টমারের সেভ করা একাধিক ঠিকানা
+  notifications          Notification[]        // কাস্টমারের ইন-অ্যাপ নোটিফিকেশন
+  wallet                 CustomerWallet?
+  refundRequests         RefundRequest[]
+  staffProfile           StaffProfile?
+  supportTickets         SupportTicket[]
+  liveChatSessions       LiveChatSession[]
+  returnRequests         ReturnRequest[]
+  questions              ProductQuestion[]
+  resaleListings        ResaleListing[] @relation("SellerListings")
+  resaleOrders          ResaleOrder[] @relation("BuyerResaleOrders")
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+
+  @@index([email])
+  @@index([role])
+}
+
+model ApiKey {
+  id         String    @id @default(uuid())
+  keyHash    String    @unique // SHA-256 হ্যাশ
+  keyPrefix  String    // e.g. "sk_live_ab" (চেনার জন্য)
+  name       String    @default("Chrome Extension Key") // কোন কাজের চাবি
+  scopes     String    @default("*") // পারমিশন (যেমন: "scrape,catalog")
+  isActive   Boolean   @default(true)
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+// ─── ২. কাস্টমার মাল্টিপল অ্যাড্রেস বুক (Home, Office) ───
+model UserAddress {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  label         String   @default("Home") // "Home", "Office", "Factory"
+  recipientName String   // পার্সেল রিসিভ করবে যার নাম
+  phone         String   // রিসিভারের মোবাইল নম্বর
+  city          String   // e.g. "Dhaka", "Chittagong"
+  zone          String?  // e.g. "Gulshan 2", "Dhanmondi", "Mirpur"
+  streetAddress String   @db.Text // বাড়ি, রোড, ফ্ল্যাট নম্বর
+  postalCode    String?
+  isDefault     Boolean  @default(false) // ডিফল্ট ডেলিভারি অ্যাড্রেস কি না
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  @@index([userId])
+}
+// ─── ৩. কাস্টমার ইন-অ্যাপ লাইভ নোটিফিকেশন ───
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title     String   // e.g. "অর্ডার ডিসপ্যাচ হয়েছে!"
+  message   String   @db.Text // e.g. "আপনার পার্সেল A2Z-98124 বিমানে করে ঢাকার পথে রওয়ানা হয়েছে।"
+  linkUrl   String?  // ক্লিক করলে যে পেজে যাবে (e.g. "/account/orders/A2Z-98124")
+  type      String   @default("order") // "order", "price_alert", "promo", "system"
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  @@index([userId])
+  @@index([isRead])
+}
+
+model AffiliateProfile {
+  id             String          @id @default(uuid())
+  userId         String          @unique
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referralCode   String          @unique // e.g. "A2Z-101"
+  tier           String          @default("bronze") // bronze (2%), silver (3.5%), gold (5%)
+  commissionRate Float           @default(2.0)
+  balance        Float           @default(0.0)
+  totalEarned    Float           @default(0.0)
+  totalReferrals Int             @default(0)
+  withdrawals    AffiliateWithdrawalRequest[]
+  logs           CommissionLog[]
+  createdAt      DateTime        @default(now())
+}
+
+model CommissionLog {
+  id          String           @id @default(uuid())
+  affiliateId String
+  name        String?
+  affiliate   AffiliateProfile @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  orderId     String?
+  amount      Float
+  status      String           @default("pending") // pending, approved, paid
+  createdAt   DateTime         @default(now())
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  name       String?
+  role       String?
+  action     String   // e.g. "PRODUCT_PRICE_UPDATED", "PARCEL_QC_APPROVED"
+  targetType String?  // e.g. "Product", "Order", "Parcel"
+  targetId   String?
+  details    Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+}
+
+model CustomerPriceAlert {
+  id          String    @id @default(uuid())
+  userId      String?
+  user        User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email       String
+  name        String?
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  variantId   String?
+  variant     Variant?  @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  targetPrice Float
+  isActive    Boolean   @default(true)
+  isTriggered Boolean   @default(false)
+  triggeredAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId])
+  @@index([productId])
+}
+

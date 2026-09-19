@@ -1,0 +1,172 @@
+// ─────────────────────────────────────────────────────────────
+// WMS RACK & BIN LOCATIONS, BARCODE SCANNERS & STOCK MOVEMENTS
+// ─────────────────────────────────────────────────────────────
+
+enum ScanAction {
+  INBOUND_RECEIVE   // পার্সেল বিদেশের ওয়্যারহাউসে ঢোকা মাত্রই স্ক্যান
+  BIN_ALLOCATION    // নির্দিষ্ট র‍্যাক বা তাকের বিনে রাখার স্ক্যান
+  QC_INSPECTION     // আনবক্সিং ও কিউসি স্ক্যান
+  REPACK_DISCARD    // অতিরিক্ত আমাজন বক্স বাদ দিয়ে হালকা করার স্ক্যান
+  DISPATCH_FLIGHT   // আন্তর্জাতিক বিমানে তোলার আগে মাস্টার স্ক্যান
+}
+
+enum InventoryAction {
+  PURCHASE_RESTOCK    // আমাজন থেকে নতুন কেনা স্টক
+  ORDER_RESERVED      // কাস্টমার অর্ডার করায় স্টক হোল্ড
+  ORDER_FULFILLED     // কাস্টমারকে পাঠিয়ে দেওয়া সম্পন্ন
+  DAMAGE_LOSS         // ক্ষতিগ্রস্ত বা নষ্ট হওয়া
+  RETURN_RESTOCK      // কাস্টমার রিটার্ন করায় স্টকে ফেরত
+}
+
+// ─── ১. ওয়্যারহাউস র‍্যাক ও বিন লোকেশন (Aisle -> Rack -> Shelf -> Bin) ───
+model WarehouseLocation {
+  id           String                @id @default(uuid())
+  warehouseId  String
+  warehouse    ConsolidatorWarehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  aisle        String                // e.g. "Aisle 02" (গলি)
+  rack         String                // e.g. "Rack B" (তাক)
+  shelf        String                // e.g. "Shelf 04" (লেভেল)
+  bin          String                // e.g. "Bin 12" (নির্দিষ্ট বক্স)
+
+  barcode      String                @unique // e.g. "LOC-USA-A02-RB-S04-B12"
+  isOccupied   Boolean               @default(false)
+
+  createdAt    DateTime              @default(now())
+
+  @@index([warehouseId])
+  @@index([barcode])
+}
+
+// ─── ২. হ্যান্ডহেল্ড জেব্রা বারকোড স্ক্যানার লগ্স ───
+model BarcodeScanLog {
+  id             String     @id @default(uuid())
+  warehouseId    String
+  scannedBarcode String     // পার্সেল ট্র্যাকিং বা বিন বারকোড
+
+  parcelId       String?
+  parcel         Parcel?    @relation(fields: [parcelId], references: [id], onDelete: SetNull)
+
+  action         ScanAction
+  scannedByStaff String     // যে স্টাফ স্ক্যান গান দিয়ে স্ক্যান করেছে
+  locationCode   String?    // কোন বিনে রাখা হলো
+  notes          String?
+
+  scannedAt      DateTime   @default(now())
+
+  @@index([warehouseId])
+  @@index([scannedBarcode])
+  @@index([action])
+}
+
+// ─── ৩. প্যাকেজিং ম্যাটেরিয়াল স্টক ও খরচ ───
+model PackagingMaterial {
+  id          String   @id @default(uuid())
+  name        String   // e.g. "Heavy Duty Double Wall Box 12x12x12", "Bubble Wrap 50m"
+  type        String   // "BOX", "BUBBLE_WRAP", "POLY_MAILER", "TAPE"
+  unitCostUsd Float    // প্রতি বক্স বা ম্যাটেরিয়ালের কেনা খরচ (USD)
+  stockQty    Int      @default(100)
+  weightGrams Float    @default(150.0) // প্যাকেজিংয়ের নিজস্ব ওজন
+
+  updatedAt   DateTime @default(now()) @updatedAt
+}
+
+// ─── ৪. ইনভেন্টরি স্টক মুভমেন্ট অডিট লেজার ───
+model InventoryMovement {
+  id              String          @id @default(uuid())
+  productId       String
+  variantId       String?
+
+  action          InventoryAction
+  quantityChanged Int             // যেমন: +5 অথবা -1
+  previousStock   Int
+  newStock        Int
+
+  referenceOrder  String?         // কোন অর্ডারের কারণে পরিবর্তন
+  performedBy     String?         // কোন স্টাফ অ্যাডজাস্ট করেছে
+  notes           String?
+
+  createdAt       DateTime        @default(now())
+
+  @@index([productId])
+  @@index([variantId])
+  @@index([action])
+}
+
+// ─── ৫. কার্গো ফ্লাইট ও ডিসপ্যাচ ম্যানিফেস্ট (Multi-Carrier Master Dispatch) ───
+model CargoManifest {
+  id                    String                 @id @default(uuid())
+  manifestNumber        String                 @unique // e.g. "MNF-2026-USBD-0042"
+  warehouseId           String
+  warehouse             ConsolidatorWarehouse  @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  carrierName           String                 // "Emirates SkyCargo", "Qatar Airways Cargo", "Biman Cargo", "FedEx"
+  carrierCode           String?                // "EK", "QR", "BG", "SV", "FX"
+  masterAwb             String?                // Master Air Waybill number e.g. "176-98124012"
+  flightNumber          String?                // e.g. "EK-582"
+
+  originCountry         String                 @default("US")
+  destCountry           String                 @default("BD")
+
+  departureDate         DateTime?
+  estimatedArrivalDate  DateTime?
+  actualArrivalDate     DateTime?
+
+  totalParcelsCount     Int                    @default(0)
+  totalGrossWeightKg    Float                  @default(0.0)
+  totalDeclaredValueUsd Float                  @default(0.0)
+
+  // Status: DRAFT | BOOKED | DEPARTED | IN_FLIGHT | CUSTOMS_BD | CLEARED | COMPLETED
+  status                String                 @default("DRAFT")
+  notes                 String?                @db.Text
+
+  parcels               Parcel[]
+
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  @@index([warehouseId])
+  @@index([manifestNumber])
+  @@index([status])
+}
+
+// ─── ৬. মাল্টি-ক্যারিয়ার ইন্টিগ্রেশন ও কনফিগারেশন ───
+model ShippingCarrier {
+  id                  String   @id @default(uuid())
+  code                String   @unique // "emirates", "qatar_cargo", "biman", "usps", "ups", "fedex", "pathao", "steadfast", "redx"
+  name                String   // "Steadfast Courier", "Emirates Cargo Forwarder"
+  leg                 String   // "DOMESTIC_ORIGIN" | "INTERNATIONAL_FREIGHT" | "LOCAL_BD_COURIER"
+  serviceType         String   // "AIR_FREIGHT" | "COD" | "STANDARD_DELIVERY" | "GROUND" | "EXPRESS"
+  ratePerKgUsd        Float?   @default(0.0) // আন্তর্জাতিক ফ্রেইট চার্জ প্রতি কেজি ($ USD/Kg)
+  baseDeliveryFeeBdt  Float?   @default(0.0) // ঢাকার ভেতরে ডেলিভারি ফি (BDT)
+  outsideDhakaFeeBdt  Float?   @default(0.0) // ঢাকার বাইরে ডেলিভারি ফি (BDT)
+  codFeePercent       Float?   @default(0.0) // ক্যাশ অন ডেলিভারি কমিশন % (যেমন: 1.0%)
+  trackingUrlTemplate String?  // "https://steadfast.com.bd/t/{tracking}"
+  contactPhone        String?
+  contactEmail        String?
+  accountNumber       String?  // মার্চেন্ট আইডি বা ক্লায়েন্ট কোড
+  apiEndpoint         String?
+  apiKey              String?
+  notes               String?  @db.Text
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([leg])
+  @@index([code])
+}
+
+// ─── ৭. আন্তর্জাতিক কার্গো ব্যাচ (Historical & Active Shipment Batches) ───
+model ShipmentBatch {
+  id             String    @id // e.g. "BATCH-BC754A00"
+  sourceCountry  String    // US, UK, CN
+  freightType    String?   // air, sea
+  departureDate  DateTime?
+  etaBdOffice    DateTime?
+  totalWeightKg  Float     @default(0.0)
+  status         String    @default("pending")
+  createdAt      DateTime  @default(now())
+
+  @@index([sourceCountry])
+  @@index([status])
+}

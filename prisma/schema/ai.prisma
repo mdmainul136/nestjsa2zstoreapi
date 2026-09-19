@@ -1,0 +1,68 @@
+// ─────────────────────────────────────────────────────────────
+// CENTRAL AI ENGINE, LLM PROMPTS, ENRICHMENT & SEMANTICS
+// ─────────────────────────────────────────────────────────────
+
+// ─── ১. এআই মডেল ও প্রম্পট টেমপ্লেট লাইব্রেরি ───
+model AiPromptTemplate {
+  id          String   @id @default(uuid())
+  name        String   // e.g. "E-Commerce SEO Title & Bullet Points Writer"
+  code        String   @unique // e.g. "PRODUCT_ENRICHMENT_V2"
+  modelName   String   @default("gemini-2.0-flash") // gemini-2.0-flash, gpt-4o
+  systemPrompt String  @db.Text
+  userPrompt  String   @db.Text // e.g. "Write a persuasive description for {productTitle}..."
+  temperature Float    @default(0.7)
+  isActive    Boolean  @default(true)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ─── ২. এআই এনরিচমেন্ট ব্যাচ ক্যাম্পেইন ───
+model BatchEnrichmentJob {
+  id             String                 @id @default(uuid())
+  jobName        String                 // e.g. "Bulk Beautify Amazon Descriptions"
+  totalItems     Int                    @default(0)
+  processedItems Int                    @default(0)
+  successCount   Int                    @default(0)
+  failedCount    Int                    @default(0)
+  status         String                 @default("queued") // queued, running, completed, failed
+  errorMessage   String?                @db.Text
+
+  logs           ProductEnrichmentLog[]
+
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  completedAt    DateTime?
+}
+
+// ─── ৩. প্রতিটি প্রোডাক্টের এআই এনরিচমেন্ট হিস্ট্রি ও লগ্স ───
+model ProductEnrichmentLog {
+  id                String              @id @default(uuid())
+  batchJobId        String?
+  batchJob          BatchEnrichmentJob? @relation(fields: [batchJobId], references: [id], onDelete: SetNull)
+
+  productId         String?
+  product           Product?            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  externalId        String?             // র বা স্ক্র্যাপ করা ASIN / Product External ID
+
+  productTitle      String?
+  category          String?
+  brand             String?
+  status            String?             // "SUCCESS" | "FAILED"
+
+  // পুরানো বনাম নতুন এআই জেনারেটেড ডাটা (Rollback করার সুবিধার জন্য)
+  oldDescription    String?             @db.Text
+  newDescription    String?             @db.Text
+  oldSeoTitle       String?
+  newSeoTitle       String?
+  oldSeoDescription String?             @db.Text
+  newSeoDescription String?             @db.Text
+  hsCode            String?
+  errorMessage      String?             @db.Text
+
+  createdAt         DateTime            @default(now())
+
+  @@index([batchJobId])
+  @@index([productId])
+}
+

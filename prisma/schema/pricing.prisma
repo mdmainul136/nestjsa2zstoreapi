@@ -1,0 +1,183 @@
+// ─────────────────────────────────────────────────────────────
+// DYNAMIC PRICING, LOGISTICS FREIGHT & WAREHOUSE HUBS
+// ─────────────────────────────────────────────────────────────
+
+// ─── ১. ক্যাটাগরিভিত্তিক প্রাইসিং ও প্রফিট মার্জিন রুল ───
+model PricingRule {
+  id                   String    @id @default(uuid())
+  categoryId           String?   @unique
+  category             Category? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryName         String?   // ক্যাটাগরির টেক্সট নাম (e.g. "Electronics & Gadgets")
+
+  profitMarginPct      Float     @default(0.15) // ১৫% প্রফিট মার্জিন
+  importDutyPct        Float     @default(0.10) // ১০% কাস্টমস ডিউটি
+  vatPct               Float     @default(0.15) // ১৫% ভ্যাট
+  supplementaryDutyPct Float     @default(0.00) // সম্পূরক শুল্ক (SD)
+  sdTaxPct             Float     @default(0.00) // বিকল্প এসডি ট্যাক্স কলাম
+  priceFloor           Float     @default(0.00) // সর্বনিম্ন ফ্লোর প্রাইস
+  shippingMethod       String    @default("air") // air (বিমান), sea (জাহাজ)
+
+  airFreightPerKgUsd   Float     @default(12.0) // ডিফল্ট $১২/কেজি
+  packagingFeeUsd      Float     @default(2.00) // এক্সট্রা বাবল র‍্যাপ/প্যাকিং ফি
+  isActive             Boolean   @default(true)
+
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @default(now()) @updatedAt
+}
+
+// ─── ২. [Leg 1] মার্কেটপ্লেস থেকে ইউএস ওয়্যারহাউস শিপিং রুল ───
+model MarketplaceShippingRule {
+  id                    String   @id @default(uuid())
+  source                String   // "amazon", "walmart", "sephora", "nike", "ebay", "all"
+  countryCode           String   @default("US") // US, UK
+
+  standardFee           Float    @default(5.99) // সাধারণ ডেলিভারি ফি ($5.99)
+  freeShippingThreshold Float?   @default(35.00) // $35 এর বেশি কিনলে ফ্রি শিপিং
+  isFreeWithMembership  Boolean  @default(true) // Prime/Walmart+ থাকলে ফ্রি
+
+  estimatedDaysMin      Int      @default(2) // ২ দিন
+  estimatedDaysMax      Int      @default(5) // ৫ দিন
+  isActive              Boolean  @default(true)
+  updatedAt             DateTime @default(now()) @updatedAt
+  @@unique([source, countryCode])
+}
+// ─── ২. আন্তর্জাতিক শিপিং ও এয়ার ফ্রেইট রেট ───
+model ShippingRate {
+  id                 String                 @id @default(uuid())
+  category           String                 // e.g. "Electronics", "Beauty"
+  originCountry      String                 @default("US") // US, UK, CN, AE, TR
+  destCountry        String                 @default("BD") // BD
+  shippingMethod     String                 @default("air") // air (বিমান), sea (জাহাজ), express
+
+  ratePerKg          Float                  @default(12.0) // $/kg 
+  minCharge          Float                  @default(0.0)  // মিনিমাম চার্জ (e.g. 0 or 25)
+  volumetricDivisor  Float                  @default(5000.0) // L*W*H / 5000 (ভলিউমেট্রিক ওয়েট)
+
+  estimatedDays      Int?                   @default(7) // ট্রানজিট দিন
+  estimatedDaysMin   Int                    @default(5)  // ৫ দিন
+  estimatedDaysMax   Int                    @default(10) // ১০ দিন
+
+  warehouseId        String?
+  warehouse          ConsolidatorWarehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  isActive           Boolean                @default(true)
+
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  @@index([category])
+  @@index([originCountry, destCountry])
+}
+
+// ─── ৩. বাংলাদেশে লোকাল কুরিয়ার ডেলিভারি চার্জ (Inside/Outside Dhaka) ───
+model RegionalDeliveryRate {
+  id               String   @id @default(uuid())
+  cityOrZone       String   // e.g. "Inside Dhaka", "Outside Dhaka", "Sub-Dhaka"
+  countryCode      String   @default("BD")
+  chargeAmount     Float    @default(60.0) // ৳৬০ or ৳১২০
+  estimatedDays    Int?     // সরাসরি এস্টিমেটেড দিন সংখ্যা
+  estimatedDaysMin Int      @default(1)
+  estimatedDaysMax Int      @default(3)
+  courierProvider  String?  @default("Pathao") // Pathao, Steadfast, RedX
+  isActive         Boolean  @default(true)
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+// ─── ৪. বিদেশের ওয়্যারহাউস হাবসমূহ (New York, London, Dubai) ───
+model ConsolidatorWarehouse {
+  id                    String         @id @default(uuid())
+  code                  String         @unique // e.g. "NYC-HUB-01", "LON-DEPOT-02"
+  name                  String         // e.g. "New York Export Hub"
+  countryCode           String         @default("US")
+  city                  String
+  address               String         @db.Text
+  postalCode            String?
+  phone                 String?
+  email                 String?
+
+  // ওয়্যারহাউস সার্ভিস সক্ষমতা
+  repackingAvailable    Boolean        @default(true) // হালকা করার জন্য বক্স ফেলে দেওয়া
+  consolidationAvailable Boolean       @default(true) // একাধিক পার্সেল একত্র করা
+  photoCheckAvailable   Boolean        @default(true) // ছবি তোলা
+  qcAvailable           Boolean        @default(true) // কোয়ালিটি চেক
+  orders                Order[]
+  parcels               Parcel[]
+  shippingRates         ShippingRate[] // এই ওয়্যারহাউস থেকে শিপিং রেট
+  locations             WarehouseLocation[]
+  manifests             CargoManifest[]
+
+  // ওয়্যারহাউস ফ্লাইট ও শিপমেন্ট শিডিউল (Warehouse Schedule)
+  shipmentFrequency     String?        @default("Weekly (Tue, Fri)") // e.g. "Weekly (Tue, Fri)"
+  shipmentDays          String[]       @default(["Tuesday", "Friday"])
+  shipmentDay           String?        @default("Friday") // e.g. "Friday"
+  cutoffTime            String?        @default("17:00 EST")
+  nextShipmentDate      DateTime?
+  nextShipmentDateStr   String?        // স্ট্রিং শিডিউল টেক্সট (e.g. "Next Friday")
+  shipmentNotice        String?        @db.Text
+  transitDaysMin        Int            @default(5)
+  transitDaysMax        Int            @default(10)
+
+  isActive              Boolean        @default(true)
+
+  createdAt             DateTime       @default(now())
+}
+
+// ─── ৫. দেশভিত্তিক মার্কেট রুল ও কারেন্সি ───
+model CountryMarketRule {
+  countryCode            String   @id // US, UK, BD, AE, CN
+  countryName            String
+  currency               String   @default("USD")
+  deMinimisThreshold     Float    @default(0.0) // ট্যাক্স-ফ্রি আমদানি সীমা
+  vatRatePct             Float    @default(0.15)
+  dutyRatePct            Float    @default(0.10)
+
+  importDutyRules        String?  // কাস্টমস শুল্ক নিয়মাবলী
+  paymentMethods         String[] @default([]) // পেমেন্ট মেথড তালিকা
+  couriers               String[] @default([]) // সাপোর্টেড কুরিয়ার তালিকা
+  competitors            String[] @default([]) // স্থানীয় কম্পিটিটর
+  customsDocuments       String[] @default([]) // প্রয়োজনীয় ডকুমেন্টস
+  language               String?  // ভাষা কোড (e.g. kk, bn, en)
+  importLicenseRequired  Boolean? @default(false)
+
+  prohibitedItems        String[] @default([]) // নিষিদ্ধ পণ্যের তালিকা (e.g. "Liquids", "Batteries")
+  isRestricted           Boolean  @default(false)
+
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @default(now()) @updatedAt
+}
+
+// ─── ৬. রিয়েল-টাইম লাইভ কারেন্সি এক্সচেঞ্জ রেট (USD ➔ BDT) ───
+model CurrencyExchangeRate {
+  id             String   @id @default(uuid())
+  sourceCurrency String   // e.g. "USD"
+  targetCurrency String   // e.g. "BDT"
+  rate           Float    // e.g. 136.50 (১ ডলারে ১৩৬.৫০ টাকা)
+  bufferPct      Float    @default(2.5) // e.g. 2.5%
+  effectiveRate  Float    @default(139.91) // rate * (1 + bufferPct / 100)
+  isAutoSync     Boolean  @default(true)
+  lastSyncedAt   DateTime @default(now()) @updatedAt
+
+  @@unique([sourceCurrency, targetCurrency])
+}
+// ─── ৮. বাংলাদেশ এনবিআর কাস্টমস শুল্ক ট্যারিফ টেবিল ───
+model HsCodeTaxRule {
+  id               String   @id @default(uuid())
+  hsCode           String   // e.g. "8517.13.00" (স্মার্টফোন), "3304.99.00" (স্কিনকেয়ার)
+  categoryName     String   @unique // "Smartphones & Tablets" or full category path
+
+  customsDutyPct   Float    @default(0.0) // CD (কাস্টমস ডিউটি) e.g. 25.0%
+  supplementaryPct Float    @default(0.0) // SD (সম্পূরক শুল্ক) e.g. 20.0%
+  vatPct           Float    @default(15.0) // VAT (ভ্যাট) e.g. 15.0%
+  advanceTaxPct    Float    @default(5.0)  // AIT (অগ্রিম আয়কর) e.g. 5.0%
+  totalTaxPct      Float    @default(0.0) // সর্বমোট ট্যাক্স
+  atPct            Float?   @default(5.0)  // AT (অগ্রিম কর)
+  deMinimis        Float?   @default(0.0)
+
+  description      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @default(now()) @updatedAt
+
+  @@index([hsCode])
+  @@index([categoryName])
+}

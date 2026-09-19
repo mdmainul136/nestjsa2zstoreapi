@@ -1,0 +1,157 @@
+// ─────────────────────────────────────────────────────────────
+// E-COMMERCE PRODUCTS, VARIANTS, SEO & PRICE HISTORY
+// ─────────────────────────────────────────────────────────────
+
+model Product {
+  id               String         @id @default(uuid())
+
+  // ─── ১. আইডেন্টিটি ও সোর্সিং (Amazon / Walmart / Nike / Sephora) ───
+  asin             String?        @unique // আমাজন ASIN বা মার্কেটপ্লেস প্রোডাক্ট আইডি
+  sku              String?        @unique // শপের নিজস্ব ইনভেন্টরি কোড / বারকোড
+  externalId       String?        // স্ক্র্যাপার এক্সটার্নাল আইডি (Mongo ObjectId)
+  walmartId        String?        // ওয়ালমার্ট প্রোডাক্ট আইডি
+  barcode          String?        // UPC / EAN / Barcode
+  source           String         @default("manual") // amazon, walmart, sephora, nike, target, manual
+  sourceUrl        String?        @db.Text // মার্কেটপ্লেসের মূল লিংক
+  originCountry    String?        @default("US") // Made in USA / UK
+  scrapedAt        DateTime?      // স্ক্র্যাপ করার সময়
+
+  // ─── ২. টাইটেল, স্লাগ ও ডেসক্রিপশন ───
+  title            String
+  slug             String         @unique // URL: /products/apple-iphone-15
+  description      String?        @db.Text
+  badge            Json?          // e.g. ["Amazon's Choice", "Best Seller", "Limited Time Deal"]
+  features         String[]       @default([]) // "About this item" বুলেট পয়েন্টের লিস্ট
+  ingredients      String?        @db.Text // স্কিনকেয়ার ও সাপ্লিমেন্টের উপাদান তালিকা
+  tags             String[]
+  // ─── ৩. টেকনিক্যাল স্পেক্স ও ডাইমেনশন (এক্সটেনশন ডাটা) ───
+  specs            Json?          // Key-Value স্পেক্স টেবিল: [{ name: "RAM", value: "16GB" }]
+  weightKg         Float          @default(0.1) // আসল ওজন (এয়ার ফ্রেইট হিসাবের জন্য)
+  lengthCm         Float?         // দৈর্ঘ্য
+  widthCm          Float?         // প্রস্থ
+  heightCm         Float?         // উচ্চতা
+  hsCode           String?        @default("2106.90") // কাস্টমস ট্যারিফ কোড
+  extraPackagingWeight  Float?    @default(0.1) // বাবল র‍্যাপ ও বক্সের অতিরিক্ত ওজন
+
+  // ─── ৪. প্রাইসিং, কারেন্সি ও ব্রেকডাউন ───
+  sourcePrice      Float          @default(0.0) // আমাজনের কেনা দাম (USD)
+  sellingPrice     Float          @default(0.0) // সাইটের আসল বিক্রয়মূল্য (USD)
+  discountPrice    Float?         // ডিসকাউন্ট কাটা দাম (যেমন: ~~১০০~~)
+  comparePrice     Float?         // আসল এমএসআরপি কাটা দাম
+  currency         String         @default("USD")
+  priceOverride    Float?         // এডমিনের ম্যানুয়াল ফিক্সড প্রাইস
+  shippingCost     Float?         @default(0.0) // ক্যালকুলেটেড শিপিং খরচ
+  importDuty       Float?         @default(0.0) // কাস্টমস ডিউটি এমাউন্ট
+  profitAmount     Float?         @default(0.0) // মোট লাভ
+  taxAmount        Float?         @default(0.0) // ভ্যাট ও ট্যাক্স এমাউন্ট
+
+  // ─── ৫. স্টক, মিডিয়া ও সেলার ইনফো ───
+  stock            Int            @default(10)
+  imageUrl         String?        // প্রাইমারি মেইন থাম্বনেইল ছবি
+  images           String[]       @default([]) // সব ছবির লিঙ্কের অ্যারে
+  videos           String[]       @default([]) // প্রোডাক্ট আনবক্সিং/ডেমো ভিডিও
+  sellerName       String?        // e.g. "Sold by Apple"
+  shipsFrom        String?        // e.g. "Ships from Amazon.com"
+  deliveryMessage  String?        // e.g. "FREE delivery Tomorrow"
+  warranty         String?        // e.g. "1 Year Official Brand Warranty"
+  returnPolicy     String?        // e.g. "7 Days Replacement Guarantee"
+
+  // ─── ৬. স্ট্যাটাস, হাইলাইটস ও সোশ্যাল প্রুফ ───
+  status           ProductStatus  @default(PUBLISHED)
+  isFeatured       Boolean        @default(false)
+  rating           Float          @default(0.0) // e.g. 4.6
+  reviewCount      Int            @default(0)   // e.g. 128
+
+  // ─── ৭. ক্যাটাগরি ও সাব-ক্যাটাগরি হায়ারার্কি ───
+  subcategory      String?
+  subSubcategory   String?
+
+  // ─── ৮. এসইও ও সোশ্যাল ওপেনগ্রাফ ───
+  metaKeywords     String?
+  canonicalUrl     String?
+  robotsMeta       String?
+  schemaType       String?        @default("Product")
+  ogTitle          String?
+  ogDescription    String?
+  ogImage          String?
+  seo              SeoMetadata?
+
+
+  // ─── ৮. ক্যাটাগরি ও ব্র্যান্ড রিলেশন ───
+  categoryId       String?
+  category         Category?      @relation(fields: [categoryId], references: [id])
+  brandId          String?
+  brand            Brand?         @relation(fields: [brandId], references: [id])
+
+  // ─── ৯. সাব-রিলেশনশিপসমূহ ───
+  variants         Variant[]      // পণ্যের সব সাইজ ও কালার
+  reviews          ProductReview[]// কাস্টমার রিভিউ
+  orderItems       OrderItem[]    // অর্ডারের ভেতর পণ্যের রেকর্ড
+  priceHistory     PriceHistory[] // বিগত ৯০ দিনের প্রাইস ট্র্যাকিং গ্রাফ
+  priceAlerts           CustomerPriceAlert[] // প্রাইস ড্রপ এলার্ট
+  attributes      ProductAttributeValue[]
+  // 👉 এই ৩টি মার্কেটিং রিলেশন যোগ করুন:
+  coupons               Coupon[]          // প্রোডাক্ট-ভিত্তিক কুপন
+  flashSaleItems        FlashSaleItem[]   // ফ্ল্যাশ সেল ডিলস
+  bundleItems           BundleItem[]      // প্রোডাক্ট বান্ডেল কম্বো
+  wishlistItems         WishlistItem[] //
+  enrichmentLogs        ProductEnrichmentLog[]
+  questions             ProductQuestion[]
+  returnRequests        ReturnRequest[]
+  resaleListings        ResaleListing[]
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([source])
+  @@index([status])
+  @@index([slug])
+}
+
+model Variant {
+  id            String    @id @default(uuid())
+  productId     String
+  product       Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  title         String?   // e.g. "Midnight Black / 256GB"
+  asin          String?   // Child ASIN
+  sku           String?   @unique // ভ্যারিয়েন্টের নিজস্ব আলাদা বারকোড
+  size          String?   // e.g. "XL", "256GB"
+  color         String?   // e.g. "Space Black"
+  imageUrl      String?   // এই কালারের নির্দিষ্ট ছবি
+
+  sourcePrice   Float?    // ভ্যারিয়েন্টের কেনা দাম
+  sellingPrice  Float?    // আসল বিক্রয়মূল্য
+  discountPrice Float?    // ডিসকাউন্ট কাটা দাম
+  comparePrice  Float?    // এমএসআরপি কাটা দাম
+  weightKg      Float?    // ভ্যারিয়েন্টের আলাদা ওজন
+  availability  String?   @default("In Stock") // "In Stock" | "Out of Stock"
+  stock         Int       @default(5)
+  isAvailable   Boolean   @default(true)
+  orderItems    OrderItem[]
+  seo           SeoMetadata?
+  priceHistory  PriceHistory[]
+  flashSaleItems FlashSaleItem[]
+  priceAlerts   CustomerPriceAlert[]
+  reviews       ProductReview[]
+  wishlist      WishlistItem[]
+  createdAt     DateTime  @default(now())
+
+  @@index([productId])
+}
+
+model PriceHistory {
+  id          String    @id @default(uuid())
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  variantId   String?
+  variant     Variant?  @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  price       Float     // সেদিনের বিক্রয়মূল্য
+  sourcePrice Float?    // সেদিনের কেনা দাম
+  reason      String?   // প্রাইস পরিবর্তনের কারণ (e.g. "Scraper Price Drop", "PIM Recalculate")
+  currency    String    @default("USD")
+  recordedAt  DateTime  @default(now())
+
+  @@index([productId])
+  @@index([variantId])
+}

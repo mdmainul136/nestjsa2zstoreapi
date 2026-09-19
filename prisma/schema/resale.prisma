@@ -1,0 +1,95 @@
+// ─────────────────────────────────────────────────────────────
+// P2P CUSTOMER RESALE MARKETPLACE, PRE-LOVED & RE-COMMERCE
+// ─────────────────────────────────────────────────────────────
+
+enum ResaleCondition {
+  BRAND_NEW_WITH_TAG   // আনবক্সও করা হয়নি, ট্যাগসহ নতুন
+  OPEN_BOX_NEVER_USED  // বক্স খোলা হয়েছে কিন্তু ব্যবহার করা হয়নি
+  LIKE_NEW             // ১-২ বার ট্রায়াল দেওয়া
+  GENTLY_USED          // অল্প ব্যবহৃত কিন্তু দারুণ কন্ডিশন
+}
+
+enum ResaleStatus {
+  PENDING_APPROVAL     // অ্যাডমিনের অনুমোদনের অপেক্ষায়
+  ACTIVE               // স্টোরে বিক্রির জন্য লাইভ রয়েছে
+  RESERVED             // কোনো বায়ার অর্ডার করেছে
+  SOLD                 // সফলভাবে বিক্রি সম্পন্ন
+  REJECTED             // ফেক বা ইনভ্যালিড ছবি দেওয়ায় রিজেক্টেড
+  CANCELLED            // সেলার নিজে ক্যানসেল করেছে
+}
+
+enum EscrowPayoutStatus {
+  HELD_IN_ESCROW       // বায়ার ডেলিভারি পেয়ে চেক করা পর্যন্ত টাকা হোল্ড
+  RELEASED_TO_SELLER   // সেলারের বিকাশ/ওয়ালেটে টাকা ট্রান্সফার সম্পন্ন
+  REFUNDED_TO_BUYER    // ঝামেলা থাকায় বায়ারকে টাকা রিফান্ড
+}
+
+// ─── ১. কাস্টমার রি-সেল লিস্টিং ───
+model ResaleListing {
+  id                 String          @id @default(uuid())
+  listingNumber      String          @unique // e.g. "RSL-2026-0089"
+
+  sellerId           String          // যে কাস্টমার বিক্রি করছে
+  seller             User            @relation("SellerListings", fields: [sellerId], references: [id], onDelete: Cascade)
+
+  // আসল অর্ডারের ভেরিফায়েড লিংক (Authentic Verified Purchase Badge)
+  orderId            String?
+  order              Order?          @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  productId          String?
+  product            Product?        @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  title              String          // e.g. "Nike Air Jordan 1 Retro High (Size: 42 EU)"
+  description        String          @db.Text
+  categoryName       String?
+  brandName          String?
+
+  condition          ResaleCondition @default(BRAND_NEW_WITH_TAG)
+  originalPriceBdt   Float           // কেনা দাম (৳)
+  resalePriceBdt     Float           // কাস্টমারের চাওয়া বিক্রয়মূল্য (৳)
+
+  commissionPct      Float           @default(8.0) // প্ল্যাটফর্মের ৮% কমিশন
+  sellerPayoutAmount Float           // বিক্রির পর সেলার পাবে (৳)
+
+  photoUrls          String[]        @default([]) // কাস্টমারের তোলা আসল পণ্যের ছবি
+  locationCity       String          @default("Dhaka")
+
+  isVerifiedOriginal Boolean         @default(true) // এই ওয়েবসাইট থেকে কেনা জেনুইন প্রোডাক্ট কি না
+  status             ResaleStatus    @default(PENDING_APPROVAL)
+
+  resaleOrder        ResaleOrder?
+
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@index([sellerId])
+  @@index([status])
+  @@index([condition])
+}
+
+// ─── ২. রি-সেল অর্ডার ও এসক্রো পে-আউট (Escrow Protection) ───
+model ResaleOrder {
+  id                 String             @id @default(uuid())
+  resaleListingId    String             @unique
+  resaleListing      ResaleListing      @relation(fields: [resaleListingId], references: [id], onDelete: Cascade)
+
+  buyerId            String             // যে নতুন কাস্টমার কিনছে
+  buyer              User               @relation("BuyerResaleOrders", fields: [buyerId], references: [id])
+
+  saleAmount         Float              // বায়ার পরিশোধ করেছে
+  platformCommission Float              // প্ল্যাটফর্মের লাভ
+  sellerEarnings     Float              // সেলারের পাওনা টাকা
+
+  deliveryAddress    Json               // বায়ারের ডেলিভারি ঠিকানা
+  courierTracking    String?            // পাঠাও/স্টেডফাস্ট লোকাল কুরিয়ার ট্র্যাকিং
+
+  payoutStatus       EscrowPayoutStatus @default(HELD_IN_ESCROW)
+  payoutMethod       String             @default("WALLET") // "WALLET", "BKASH"
+  sellerTrxId        String?            // সেলারকে পাঠানো বিকাশ TrxID
+
+  createdAt          DateTime           @default(now())
+  completedAt        DateTime?
+
+  @@index([buyerId])
+  @@index([payoutStatus])
+}

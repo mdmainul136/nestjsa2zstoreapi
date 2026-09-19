@@ -1,0 +1,112 @@
+// ─────────────────────────────────────────────────────────────
+// CUSTOMER WALLETS, REFUNDS, STORE CREDIT & PAYMENT AUDIT LEDGER
+// ─────────────────────────────────────────────────────────────
+
+enum WalletTxType {
+  DEPOSIT           // টাকা যোগ
+  PURCHASE_PAYMENT  // অর্ডারের টাকা পরিশোধ
+  CASHBACK_REWARD   // ক্যাশব্যাক রিওয়ার্ড
+  REFUND_CREDIT     // বাতিল অর্ডারের টাকা রিফান্ড
+  WITHDRAWAL        // উইথড্র
+  ADMIN_ADJUSTMENT  // অ্যাডমিন কর্তৃক ব্যালেন্স সমন্বয়
+}
+
+enum RefundStatus {
+  PENDING           // রিফান্ডের আবেদন জমা
+  APPROVED          // অনুমোদন হয়েছে
+  PROCESSING        // গেটওয়ে/বিকাশে প্রসেস হচ্ছে
+  COMPLETED         // সফলভাবে টাকা পাঠানো হয়েছে
+  REJECTED          // বাতিল
+}
+
+// ─── ১. কাস্টমার স্টোর ক্রেডিট ওয়ালেট ───
+model CustomerWallet {
+  id           String              @id @default(uuid())
+  userId       String              @unique
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  balance      Float               @default(0.0) // বর্তমান ব্যালেন্স (BDT)
+  currency     String              @default("BDT")
+  totalDeposit Float               @default(0.0)
+  totalSpent   Float               @default(0.0)
+
+  isActive     Boolean             @default(true)
+  transactions WalletTransaction[]
+
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+}
+
+// ─── ২. ওয়ালেট ট্রানজেকশন হিস্ট্রি ───
+model WalletTransaction {
+  id           String         @id @default(uuid())
+  walletId     String
+  wallet       CustomerWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  type         WalletTxType
+  amount       Float          // ট্রানজেকশন অ্যামাউন্ট
+  balanceAfter Float          // ট্রানজেকশনের পর অবশিষ্ট ব্যালেন্স
+
+  description  String         // e.g. "Refund for Order #A2Z-98124"
+  referenceId  String?        // সম্পর্কিত অর্ডার আইডি বা রিফান্ড আইডি
+
+  createdAt    DateTime       @default(now())
+
+  @@index([walletId])
+  @@index([type])
+}
+
+// ─── ৩. রিফান্ড রিকোয়েস্ট ও প্রসেসিং ───
+model RefundRequest {
+  id              String       @id @default(uuid())
+  orderId         String
+  order           Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  userId          String?
+  user            User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  amount          Float        // কত টাকা রিফান্ড হবে
+  reason          String       @db.Text // রিফান্ডের কারণ (e.g. "Item out of stock on Amazon")
+
+  refundMethod    String       @default("WALLET") // "WALLET" | "BKASH" | "NAGAD" | "ORIGINAL_GATEWAY"
+  accountNumber   String?      // বিকাশ/নগদ নম্বর (যদি ওয়ালেটের বাইরে চায়)
+  bankName        String?
+
+  status          RefundStatus @default(PENDING)
+  gatewayTrxId    String?      // রিফান্ডের ট্রানজেকশন আইডি
+
+  adminNotes      String?      @db.Text
+  processedBy     String?      // যে অ্যাডমিন/স্টাফ রিফান্ড পাঠিয়েছে
+  processedAt     DateTime?
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([orderId])
+  @@index([userId])
+  @@index([status])
+}
+
+// ─── ৪. পেমেন্ট গেটওয়ে সেন্ট্রাল লেজার ───
+model PaymentTransaction {
+  id              String   @id @default(uuid())
+  orderId         String?
+  order           Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  gateway         String   // "bkash", "nagad", "sslcommerz", "stripe", "wallet"
+  transactionType String   // "PAYMENT", "REFUND", "CHARGEBACK"
+
+  gatewayTrxId    String   @unique // বিকাশ TrxID বা স্ট্রাইপ Charge ID
+  amount          Float
+  currency        String   @default("BDT")
+  feeCharged      Float    @default(0.0) // গেটওয়ে ফি (1.5%)
+
+  status          String   // "SUCCESS", "FAILED", "PENDING"
+  rawWebhookData  Json?    // গেটওয়ের সম্পূর্ণ রিয়েল-টাইম ডাটা
+
+  createdAt       DateTime @default(now())
+
+  @@index([orderId])
+  @@index([gatewayTrxId])
+  @@index([status])
+}

@@ -1,0 +1,175 @@
+// ─────────────────────────────────────────────────────────────
+// CUSTOMER ENGAGEMENT, REVIEWS, WISHLIST, RFQ & SOURCING
+// ─────────────────────────────────────────────────────────────
+
+enum RequestStatus {
+  PENDING                  // ১. রিকোয়েস্ট জমা হয়েছে
+  UNDER_REVIEW             // ২. অ্যাডমিন যাচাই করছে
+  QUOTED                   // ৩. অ্যাডমিন দাম কোট করেছে
+  PAYMENT_PENDING          // ৪. কাস্টমারের পেমেন্টের অপেক্ষায়
+  PAID                     // ৫. কাস্টমার টাকা পরিশোধ করেছে
+  MARKETPLACE_ORDERED      // ৬. আমাজন/শেফোরা থেকে কেনা হয়েছে
+  SHIPPED_TO_WAREHOUSE     // ৭. মার্কেটপ্লেস থেকে বিদেশের ওয়্যারহাউসে যাচ্ছে
+  PROCESSING_AT_WAREHOUSE  // ৮. ওয়্যারহাউসে রিসিভ, কিউসি ও প্যাকিং চলছে
+  SHIPPED_TO_COUNTRY       // ৯. আন্তর্জাতিক ফ্লাইটে বাংলাদেশের উদ্দেশ্যে রওয়ানা
+  CUSTOMS_CLEARANCE        // ১০. এয়ারপোর্টে কাস্টমস শুল্ক ক্লিয়ারেন্স হচ্ছে
+  OUT_FOR_DELIVERY         // ১১. লোকাল কুরিয়ারে ডেলিভারির জন্য বের হয়েছে
+  DELIVERED                // ১২. কাস্টমার ডেলিভারি পেয়েছে
+  CANCELLED                // বাতিল
+  REFUNDED                 // টাকা ফেরত দেওয়া হয়েছে
+  REJECTED                 // অ্যাডমিন রিকোয়েস্ট বাতিল করেছে
+}
+
+// ─── ১. কাস্টমার প্রোডাক্ট রিভিউ ও সোশ্যাল প্রুফ ───
+model ProductReview {
+  id                  String    @id @default(uuid())
+
+  productId           String
+  product             Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId           String?
+  variant             Variant?  @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  userId              String?
+  user                User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  customerName        String
+  customerEmail       String?
+  rating              Int       @default(5)
+  title               String?
+  comment             String?   @db.Text
+  photoUrls           String[]  @default([])
+
+  isApproved          Boolean   @default(true)
+  isVerifiedPurchase  Boolean   @default(false)
+  likesCount          Int       @default(0)
+  adminReply          String?   @db.Text
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  @@index([productId])
+  @@index([userId])
+}
+// ─── ২. কাস্টমার উইশলিস্ট ───
+model WishlistItem {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId String?
+  variant   Variant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  @@unique([userId, productId])
+  @@index([userId])
+  @@index([productId])
+}
+// ─── ৩. "Buy For Me" - কাস্টম সোর্সিং রিকোয়েস্ট (URL পেস্ট করে অর্ডার) ───
+model ProductRequest {
+  id             String        @id @default(uuid())
+  userId         String?
+  user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  customerName   String
+  customerEmail  String
+  customerPhone  String
+
+  productUrl     String        @db.Text // আমাজন/শেফোরার মূল লিংক
+  productTitle   String?       // পণ্যের নাম
+  quantity       Int           @default(1)
+
+  estimatedPrice Float?        // কাস্টমারের আনুমানিক বাজেট (USD)
+  quotedPriceUsd Float?        // অ্যাডমিনের কোট করা আসল দাম (USD)
+  quotedPriceBdt Float?        // ঢাকায় হোম ডেলিভারিসহ সর্বমোট টাকার হিসাব (BDT)
+
+  // পেমেন্ট ও ট্রানজেকশন অডিট
+  paymentMethod  String?       // bkash, nagad, card
+  transactionId  String?       // TrxID
+  paidAmount     Float?        // কত টাকা পেইড হয়েছে
+  paidAt         DateTime?     // পেমেন্টের সময়
+
+  // কনভার্টেড অর্ডার লিংক (টাকা দেওয়ার পর তৈরি হওয়া অর্ডার)
+  orderId        String?
+  order          Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  notes          String?       @db.Text
+  adminNotes     String?       @db.Text
+  status         RequestStatus @default(PENDING)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  @@index([userId])
+  @@index([customerEmail])
+  @@index([status])
+}
+// ─── ৪. B2B হোলসেল ও বাল্ক কোটেশন রিকোয়েস্ট (RFQ) ───
+model QuotationRequest {
+  id             String        @id @default(uuid())
+  userId         String?
+  user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  name           String
+  email          String
+  phone          String?
+  company        String?
+
+  productId      String?
+  productName    String?
+  productUrl     String?       @db.Text
+  quantity       Int           @default(10)
+  targetPrice    Float?
+  currency       String        @default("USD")
+
+  message        String?       @db.Text
+  status         String        @default("pending") // pending, quoted, rejected, approved
+  quotedPrice    Float?
+  adminNotes     String?       @db.Text
+  costPrice      Float?
+  weightKg       Float?
+  calcCurrency   String?
+  ruleCategory   String?
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  @@index([userId])
+  @@index([email])
+}
+// ─── ৫. কন্টাক্ট মেসেজ ও সাপোর্ট ইনকোয়ারি ───
+model ContactMessage {
+  id         String   @id @default(uuid())
+  name       String
+  email      String
+  phone      String?
+  subject    String?
+  message    String   @db.Text
+  isRead     Boolean  @default(false)
+  isResolved Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}
+// ─── ৬. প্রোডাক্ট প্রশ্নোত্তর (Customer Q&A) ───
+model ProductQuestion {
+  id           String          @id @default(uuid())
+  productId    String
+  product      Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  userId       String?
+  user         User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  customerName String
+  customerEmail String?
+  question     String          @db.Text
+  isApproved   Boolean         @default(true) // অ্যাডমিন মডারেশন
+
+  answers      ProductAnswer[]
+  createdAt    DateTime        @default(now())
+
+  @@index([productId])
+  @@index([userId])
+}
+
+model ProductAnswer {
+  id          String          @id @default(uuid())
+  questionId  String
+  question    ProductQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  answeredBy  String          // অ্যাডমিন বা ভেরিফায়েড স্টাফের নাম
+  isOfficial  Boolean         @default(true) // অফিশিয়াল ব্যাজ
+  answer      String          @db.Text
+
+  createdAt   DateTime        @default(now())
+
+  @@index([questionId])
+}

@@ -1,0 +1,76 @@
+// ─────────────────────────────────────────────────────────────
+// ENTERPRISE PRODUCT ATTRIBUTES & FACETED SEARCH
+// ─────────────────────────────────────────────────────────────
+
+enum AttributeType {
+  SELECT      // ড্রপডাউন সিঙ্গেল চয়েস (e.g. Material: Cotton)
+  MULTISELECT // মাল্টিপল অপশন (e.g. Compatibility: iOS, Android)
+  TEXT        // ফ্রি টেক্সট
+  NUMBER      // সংখ্যা (e.g. Battery: 5000)
+  COLOR       // কালার কোড ও সোয়াচ (e.g. #000000)
+  BOOLEAN     // Yes / No (e.g. Waterproof: Yes)
+}
+
+model Attribute {
+  id           String              @id @default(uuid())
+  name         String              @unique // যেমন: "RAM", "Color", "Shoe Size", "Storage"
+  code         String              @unique // কোডনেম: "ram", "color", "shoe_size"
+  type         AttributeType       @default(SELECT)
+  unit         String?             // যেমন: "GB", "inch", "ml", "kg"
+  isFilterable Boolean             @default(true) // শপ পেজের সাইডবার ফিল্টারে দেখাবে কি না
+  displayOrder Int                 @default(0)
+
+  values       AttributeValue[]
+  categories   CategoryAttribute[]
+  products     ProductAttributeValue[]
+
+  createdAt    DateTime            @default(now())
+
+  @@index([code])
+}
+
+model AttributeValue {
+  id           String                  @id @default(uuid())
+  attributeId  String
+  attribute    Attribute               @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  value        String                  // যেমন: "16GB", "Midnight Black", "XL"
+  colorHex     String?                 // কালার কোড (e.g. "#1C1C1E")
+  swatchUrl    String?                 // ছোট সোয়াচ থাম্বনেইল
+  displayOrder Int                     @default(0)
+
+  products     ProductAttributeValue[]
+
+  createdAt    DateTime                @default(now())
+
+  @@unique([attributeId, value])
+  @@index([attributeId])
+}
+
+model CategoryAttribute {
+  id          String    @id @default(uuid())
+  categoryId  String
+  category    Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  attributeId String
+  attribute   Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  isRequired  Boolean   @default(false)
+
+  @@unique([categoryId, attributeId])
+}
+
+model ProductAttributeValue {
+  id          String          @id @default(uuid())
+  productId   String
+  product     Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  attributeId String
+  attribute   Attribute       @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  valueId     String?
+  value       AttributeValue? @relation(fields: [valueId], references: [id], onDelete: SetNull)
+
+  customText  String?         // টেক্সট বা সংখ্যার ক্ষেত্রে কাস্টম ভ্যালু
+
+  @@unique([productId, attributeId, valueId])
+  @@index([productId])
+  @@index([attributeId])
+}

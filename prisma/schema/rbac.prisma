@@ -1,0 +1,74 @@
+// ─────────────────────────────────────────────────────────────
+// STAFF PROFILES, GRANULAR PERMISSIONS & AFFILIATE PAYOUTS
+// ─────────────────────────────────────────────────────────────
+
+enum WithdrawalStatus {
+  PENDING
+  APPROVED
+  PROCESSING
+  PAID
+  REJECTED
+}
+
+// ─── ১. স্টাফ প্রোফাইল ও ডিপার্টমেন্ট ───
+model StaffProfile {
+  id                  String   @id @default(uuid())
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  employeeCode        String   @unique // e.g. "EMP-USA-01"
+  department          String   // "WAREHOUSE_WMS", "PROCUREMENT", "SUPPORT", "ACCOUNTS"
+  designation         String   // e.g. "Senior WMS Inspector"
+
+  assignedWarehouseId String?  // কোন ওয়্যারহাউসে ডিউটি
+  isActive            Boolean  @default(true)
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+// ─── ২. গ্র্যানুলার রোল পারমিশন ম্যাট্রিক্স ───
+model RolePermission {
+  id        String   @id @default(uuid())
+  role      Role     // ADMIN, STAFF, etc.
+  resource  String   // "PRODUCTS", "ORDERS", "PRICING", "PARCELS", "REFUNDS", "SETTINGS"
+
+  canCreate Boolean  @default(false)
+  canRead   Boolean  @default(true)
+  canUpdate Boolean  @default(false)
+  canDelete Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([role, resource])
+}
+
+// ─── ৩. অ্যাফিলিয়েট কমিশন উইথড্রয়াল ও পে-আউট রিকোয়েস্ট ───
+model AffiliateWithdrawalRequest {
+  id            String             @id @default(uuid())
+  affiliateId   String
+  affiliate     AffiliateProfile   @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+
+  amount        Float              // কত টাকা উইথড্র করতে চায় (BDT)
+  payoutMethod  String             // "BKASH", "NAGAD", "BANK_TRANSFER"
+
+  accountNumber String             // বিকাশ/নগদ নম্বর বা ব্যাংক একাউন্ট
+  bankName      String?            // e.g. "Brac Bank"
+  branchName    String?
+  routingNumber String?
+
+  status        WithdrawalStatus   @default(PENDING)
+  trxId         String?            // পে-আউটের ট্রানজেকশন আইডি
+  receiptUrl    String?            // ব্যাংক জমার স্লিপ বা স্ক্রিনশট
+
+  processedBy   String?            // যে একাউন্ট্যান্ট পে করেছে
+  processedAt   DateTime?
+  rejectionNote String?            @db.Text
+
+  requestedAt   DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@index([affiliateId])
+  @@index([status])
+}

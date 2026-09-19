@@ -1,0 +1,58 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ─────────────────────────────────────────────────────────────
+// গ্লোবাল ENUMS
+// ─────────────────────────────────────────────────────────────
+enum Role {
+  SUPERADMIN
+  ADMIN
+  DEVELOPER
+  STAFF
+  CUSTOMER
+}
+
+enum ProductStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+  OUT_OF_STOCK
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  ARCHIVED
+  MARKETPLACE_ORDERED
+  SHIPPED_TO_WAREHOUSE
+  PROCESSING_AT_WAREHOUSE
+  SHIPPED_TO_COUNTRY
+  CUSTOMS_CLEARANCE
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+  REFUNDED
+  RETURNED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PENDING
+  PAID
+  CANCELLED
+  REFUNDED
+  PARTIALLY_PAID
+  FAILED
+}
+
+enum FrequencyType {
+  DAILY
+  WEEKLY
+  MONTHLY
+  HOURLY
+}

@@ -1,0 +1,332 @@
+// ─────────────────────────────────────────────────────────────
+// ENTERPRISE MARKETING, PROMOTIONS, BUNDLES, LOYALTY & CMS
+// ─────────────────────────────────────────────────────────────
+
+enum CouponDiscountType {
+  PERCENTAGE // শতকরা ছাড় (e.g. 10%)
+  FIXED      // নির্দিষ্ট টাকার ছাড় (e.g. ৳500)
+}
+
+enum CouponScope {
+  GLOBAL     // পুরো স্টোরের জন্য
+  CATEGORY   // নির্দিষ্ট ক্যাটাগরির জন্য
+  PRODUCT    // নির্দিষ্ট প্রোডাক্টের জন্য
+  BRAND
+}
+
+// ─── ১. ডিসকাউন্ট কুপন ও প্রমোশনাল কোড ───
+model Coupon {
+  id                String             @id @default(uuid())
+  code              String             @unique // e.g. "WELCOME10", "EID500"
+  description       String?
+  discountType      CouponDiscountType @default(PERCENTAGE)
+  discountValue     Float              // 10 (10%) অথবা 500 (৳500)
+
+  scope             CouponScope        @default(GLOBAL)
+
+  minOrderAmount    Float              @default(0.0) // সর্বনিম্ন অর্ডার
+  maxDiscountAmount Float?             // সর্বোচ্চ ছাড়ের সিলিং
+
+  usageLimit        Int?               // মোট কতবার ব্যবহৃত হতে পারবে
+  usedCount         Int                @default(0)
+  limitPerUser      Int                @default(1) // একজন কাস্টমার সর্বোচ্চ কতবার ব্যবহার করতে পারবে
+
+  startDate         DateTime           @default(now())
+  expiresAt         DateTime?
+  isActive          Boolean            @default(true)
+
+  // সোর্স মার্কেটপ্লেস ও ক্যাটাগরি টার্গেটিং
+  source            String?            // "ALL" | "amazon" | "walmart" | "ebay" | "sephora" | "nike" | "target"
+  categoryName      String?            // "ALL" | "Electronics" | "Fashion & Apparel" | "Beauty & Personal Care" | etc.
+
+  // রিলেশনস
+  products          Product[]
+  categories        Category[]
+  brands            Brand[]
+  usages            CouponUsage[]      // কোন কোন ইউজার এই কুপন ব্যবহার করেছে
+
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@index([code])
+  @@index([source])
+  @@index([categoryName])
+}
+
+// ─── ২. কুপন ব্যবহারের অডিট লগ (প্রতারণা রোধ করার জন্য) ───
+model CouponUsage {
+  id             String   @id @default(uuid())
+  couponId       String
+  coupon         Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  orderId        String?  // যে অর্ডারে ব্যবহার হয়েছে
+  discountAmount Float    // কত টাকা ছাড় পেয়েছে
+  usedAt         DateTime @default(now())
+
+  @@index([couponId])
+  @@index([userId])
+}
+
+// ─── ৩. প্রোডাক্ট বান্ডেল ও Frequently Bought Together ───
+model ProductBundle {
+  id             String       @id @default(uuid())
+  title          String       // e.g. "iPhone 15 Complete Protection Combo"
+  slug           String       @unique
+  discountAmount Float        @default(0.0) // বান্ডেল নিলে অতিরিক্ত কত ছাড়
+  isActive       Boolean      @default(true)
+
+  items          BundleItem[] // বান্ডেলের ভেতরের প্রোডাক্টসমূহ
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model BundleItem {
+  id        String        @id @default(uuid())
+  bundleId  String
+  bundle    ProductBundle @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([bundleId, productId])
+}
+
+// ─── ৪. কাউন্টডাউন টাইমার ফ্ল্যাশ সেল ক্যাম্পেইন ───
+model FlashSaleCampaign {
+  id          String          @id @default(uuid())
+  title       String          // e.g. "Midnight Hot Deals"
+  slug        String          @unique
+  bannerUrl   String?
+  discountTag String?         // e.g. "UP TO 40% OFF"
+  brandId     String?
+  brand       Brand?          @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  startTime   DateTime
+  endTime     DateTime
+  isActive    Boolean         @default(true)
+
+  items       FlashSaleItem[]
+
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([slug])
+}
+
+model FlashSaleItem {
+  id         String            @id @default(uuid())
+  campaignId String
+  campaign   FlashSaleCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId  String?
+  variant    Variant?          @relation(fields: [variantId], references: [id], onDelete: SetNull)
+
+  dealPrice  Float             // ফ্ল্যাশ সেলের স্পেশাল দাম
+  stockLimit Int               @default(50) // সর্বোচ্চ লিমিট
+  soldCount  Int               @default(0)  // প্রগ্রেস বার
+
+  createdAt  DateTime          @default(now())
+
+  @@unique([campaignId, productId])
+  @@index([campaignId])
+}
+
+/// ─── ৭. কাস্টমার লয়্যালটি পয়েন্ট ও ক্যাশব্যাক রিওয়ার্ড ───
+model LoyaltyReward {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  points      Int       @default(0)   // অর্জিত লয়্যালটি পয়েন্ট (যেমন: প্রতি ১০০০ টাকায় ১০ পয়েন্ট)
+  rewardType  String    @default("POINTS") // "POINTS" | "CASHBACK" | "DISCOUNT_VOUCHER"
+  rewardValue Float     @default(0.0) // টাকার সমপরিমাণ মান (যেমন: ৫০ টাকা)
+
+  description String    // e.g. "Order #A2Z-98124 কেনাকাটায় ক্যাশব্যাক পয়েন্ট"
+  isClaimed   Boolean   @default(false) // রিডিম করেছে কি না
+  claimedAt   DateTime? // কবে ব্যবহার করেছে
+  expiresAt   DateTime? // পয়েন্টের মেয়াদ
+  createdAt   DateTime  @default(now())
+  @@index([userId])
+  @@index([isClaimed])
+}
+
+// ─── ৬. হেল্প সেন্টার, প্রশ্ন-উত্তর ও এফএকিউ নলেজবেস ───
+model FaqCategory {
+  id           String    @id @default(uuid())
+  name         String    // e.g. "Shipping & Customs", "Ordering & Payment"
+  slug         String    @unique
+  icon         String?
+  displayOrder Int       @default(0)
+  faqs         FaqItem[]
+
+  createdAt    DateTime  @default(now())
+}
+
+model FaqItem {
+  id           String      @id @default(uuid())
+  categoryId   String
+  category     FaqCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  question     String      // e.g. "আমাজন থেকে পণ্য আসতে কয়দিন সময় লাগে?"
+  answer       String      @db.Text
+  displayOrder Int         @default(0)
+  isPublished  Boolean     @default(true)
+
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([categoryId])
+}
+
+// ─── ৭. কাস্টমার আনবক্সিং সোশ্যাল প্রুফ ও টেস্টমোনিয়াল ───
+model Testimonial {
+  id           String   @id @default(uuid())
+  customerName String
+  customerCity String?  // e.g. "Gulshan, Dhaka"
+  avatarUrl    String?
+  rating       Int      @default(5)
+  comment      String   @db.Text
+  photoUrls    String[] @default([]) // পার্সেল আনবক্সিংয়ের ছবি
+  isFeatured   Boolean  @default(true)
+
+  createdAt    DateTime @default(now())
+}
+
+// ─── ৮. ব্লগ পোস্ট ও কন্টেন্ট ───
+model BlogPost {
+  id          String       @id @default(uuid())
+  title       String
+  slug        String       @unique
+  excerpt     String?      @db.Text
+  content     String       @db.Text
+  coverImage  String?
+  authorName  String?      @default("Admin")
+  isPublished Boolean      @default(true)
+  tags        String[]     @default([])
+
+  seo         SeoMetadata?
+
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([slug])
+}
+
+// ─── ৯. ব্যানার ও হিরো স্লাইডার ───
+model Banner {
+  id             String    @id @default(uuid())
+  title          String
+  subtitle       String?
+  imageUrl       String
+  mobileImageUrl String?
+  linkUrl        String?
+  badgeText      String?
+  position       String    @default("hero")
+  displayOrder   Int       @default(0)
+  brandId        String?
+  brand          Brand?    @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  startDate      DateTime?
+  endDate        DateTime?
+  isActive       Boolean   @default(true)
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([position])
+}
+
+// ─── ১০. প্রমোশনাল পপ-আপ ───
+model PopupAnnouncement {
+  id               String   @id @default(uuid())
+  title            String
+  description      String?  @db.Text
+  imageUrl         String?
+  actionButtonText String?  @default("Shop Now")
+  actionButtonUrl  String?  @default("/shop")
+  couponCode       String?
+  delaySeconds     Int      @default(5)
+  isActive         Boolean  @default(true)
+
+  createdAt        DateTime @default(now())
+}
+
+// ─── ১১. নিউজলেটার সাবস্ক্রাইবার্স ───
+model NewsletterSubscriber {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  source    String   @default("footer")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+// ─── ১৫. পরিত্যক্ত কার্ট ট্র্যাকিং ও রিকভারি ক্যাম্পেইন ───
+model AbandonedCart {
+  id            String    @id @default(uuid())
+  userId        String?
+  customerEmail String?
+  customerPhone String?
+
+  cartData      Json      // পণ্যের নাম, ভ্যারিয়েন্ট ও দামের স্ন্যাপশট
+  totalAmount   Float     // মোট টাকার পরিমাণ
+
+  isRecovered   Boolean   @default(false) // পরবর্তীতে কিনেছে কি না
+  remindedAt    DateTime? // কত তারিখে রিমাইন্ডার এসএমএস/ইমেইল পাঠানো হয়েছে
+  recoveryCoupon String?  // কাস্টমারকে দেওয়া স্পেশাল কুপন কোড
+
+  createdAt     DateTime  @default(now())
+  @@index([customerEmail])
+  @@index([customerPhone])
+  @@index([isRecovered])
+}
+// ─── ১৬. ডিজিটাল গিফট কার্ড ও ভাউচার ───
+model GiftCard {
+  id              String            @id @default(uuid())
+  code            String            @unique // e.g. "GIFT-2026-9812-4521"
+  initialBalance  Float             // কার্ডের মূল ব্যালেন্স (যেমন: ৳৫,০০০)
+  currentBalance  Float             // বর্তমান অবশিষ্ট ব্যালেন্স
+  currency        String            @default("BDT")
+
+  recipientEmail  String?           // যার জন্য গিফট কেনা হয়েছে
+  senderName      String?
+  message         String?           @db.Text
+
+  isActive        Boolean           @default(true)
+  expiresAt       DateTime?
+
+  usages          GiftCardUsage[]
+  createdAt       DateTime          @default(now())
+
+  @@index([code])
+}
+
+model GiftCardUsage {
+  id         String   @id @default(uuid())
+  giftCardId String
+  giftCard   GiftCard @relation(fields: [giftCardId], references: [id], onDelete: Cascade)
+
+  orderId    String   // কোন অর্ডারে ব্যবহার হয়েছে
+  amountUsed Float    // কত টাকা খরচ করেছে
+  usedAt     DateTime @default(now())
+
+  @@index([giftCardId])
+}
+
+// ─── ১৭. ইমেইল মার্কেটিং ও ব্রডকাস্ট ক্যাম্পেইন ───
+model EmailCampaign {
+  id             String    @id @default(uuid())
+  title          String    // e.g. "Summer Flash Deals 20% Off"
+  subject        String    // e.g. "Exclusive: 20% Off on Amazon US Electronics!"
+  previewText    String?   // e.g. "Limited time discount on genuine imported tech"
+  bodyHtml       String    @db.Text
+  targetAudience String    @default("ALL_SUBSCRIBERS") // "ALL_SUBSCRIBERS" | "ABANDONED_CARTS" | "PREVIOUS_BUYERS" | "VIP_CUSTOMERS"
+  status         String    @default("DRAFT") // "DRAFT" | "SCHEDULED" | "SENDING" | "SENT" | "FAILED"
+  sentCount      Int       @default(0)
+  openCount      Int       @default(0)
+  clickCount     Int       @default(0)
+  scheduledAt    DateTime?
+  sentAt         DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([status])
+}
+

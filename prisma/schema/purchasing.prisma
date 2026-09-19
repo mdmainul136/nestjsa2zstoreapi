@@ -1,0 +1,85 @@
+// ─────────────────────────────────────────────────────────────
+// PROCUREMENT, PURCHASE ORDERS, SUPPLIER ACCOUNTS & BUY-FOR-ME
+// ─────────────────────────────────────────────────────────────
+
+enum PurchaseStatus {
+  PENDING_PURCHASE  // আমাজনে কেনার অপেক্ষায়
+  PURCHASED         // স্টাফরা আমাজনে কিনেছে
+  SHIPPED_BY_SELLER // আমাজন সেলার শিপ করেছে
+  DELIVERED_TO_HUB  // ইউএসএ ওয়্যারহাউসে পৌঁছেছে
+  CANCELLED_BY_SELLER // সেলার ক্যানসেল করেছে
+}
+
+// ─── ১. সাপ্লায়ার পারচেজ অর্ডার (PO) ───
+model PurchaseOrder {
+  id                    String              @id @default(uuid())
+  poNumber              String              @unique // e.g. "PO-USA-2026-0045"
+
+  orderId               String?
+  order                 Order?              @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  supplierName          String              @default("amazon") // "amazon", "walmart", "sephora", "nike"
+  supplierOrderId       String              // আমাজনের অর্ডার নম্বর (e.g. "114-8796541-1234567")
+
+  supplierAccountId     String?
+  supplierAccount       SupplierAccount?    @relation(fields: [supplierAccountId], references: [id], onDelete: SetNull)
+
+  purchasedByStaffId    String?             // কোন স্টাফ অর্ডার করেছে
+  paymentCardLast4      String?             // e.g. "8821" (যে ক্রেডিট কার্ড দিয়ে কেনা হয়েছে)
+
+  itemsCostUsd          Float               // মূল পণ্যের খরচ (USD)
+  marketplaceTaxUsd     Float               @default(0.0) // ইউএস স্টেট ট্যাক্স
+  domesticShippingUsd   Float               @default(0.0) // ইউএস লোকাল শিপিং খরচ
+  totalCostUsd          Float               // মোট খরচ (USD)
+
+  trackingNumber        String?             // আমাজনের ইউএসপিএস/ইউপিএস ট্র্যাকিং
+  carrierName           String?             // "UPS", "USPS", "Amazon Logistics"
+
+  invoiceUrl            String?             // আমাজনের ইনভয়েস পিডিএফ/স্ক্রিনশট
+  status                PurchaseStatus      @default(PURCHASED)
+  notes                 String?             @db.Text
+
+  items                 PurchaseOrderItem[]
+
+  purchasedAt           DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  @@index([orderId])
+  @@index([supplierOrderId])
+  @@index([status])
+}
+
+// ─── ২. পারচেজ অর্ডারের ভেতরের আইটেমস ───
+model PurchaseOrderItem {
+  id              String        @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  orderItemId     String?       // কাস্টমারের কোন অর্ডার আইটেমের সাথে সংযুক্ত
+  asin            String?
+  title           String
+  quantity        Int           @default(1)
+  unitCostUsd     Float
+
+  createdAt       DateTime      @default(now())
+
+  @@index([purchaseOrderId])
+}
+
+// ─── ৩. কোম্পানির আমাজন/ওয়ালমার্ট পারচেজিং একাউন্টস ───
+model SupplierAccount {
+  id                 String          @id @default(uuid())
+  platform           String          // "amazon", "walmart", "sephora"
+  accountEmail       String          // e.g. "procurement1@a2zoutletstore.com"
+  accountName        String          // e.g. "Amazon Prime US Primary"
+
+  isPrimeMember      Boolean         @default(true)
+  dailySpendLimitUsd Float           @default(5000.0)
+  spentTodayUsd      Float           @default(0.0)
+
+  isActive           Boolean         @default(true)
+  purchaseOrders     PurchaseOrder[]
+
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+}

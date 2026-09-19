@@ -1,0 +1,42 @@
+// ─────────────────────────────────────────────────────────────
+// STOREFRONT CMS, THEMES, HOMEPAGE BUILDER & PAGE CONTENTS
+// ─────────────────────────────────────────────────────────────
+
+model CmsSetting {
+  id              String   @id @default(uuid())
+
+  // ─── ১. সাইট ও থিম ব্র্যান্ডিং (Primary Color, Accent Color, Currencies) ───
+  siteConfig      Json?    // { name, tagline, logo, primaryColor: "#00AB55", accentColor: "#ffc107", currencies: [...], languages: [...] }
+
+  // ─── ২. হেডার, টপ-বার ও মেগা মেনু ───
+  headerConfig    Json?    // { topBarEnabled, topBarText, announcementText, navLinks, megaMenuData, supportPhone, searchPlaceholder }
+
+  // ─── ৩. হিরো ব্যানার ও স্লাইডার্স ───
+  heroConfig      Json?    // { enabled, slides: [{ id, title, subtitle, imageUrl, buttonText, buttonHref, offer, badgeText, discount }] }
+
+  // ─── ৪. হোমপেজ সেকশন কন্ট্রোলার ও ড্র্যাগ-অ্যান্ড-ড্রপ সিরিয়াল ───
+  homepageConfig  Json?    // { sectionOrder: ["hero", "categories", "features", "flash_deals", "new_arrivals", "banners", "best_sellers", "testimonials", "blogs", "newsletter"], featuredCategoriesEnabled, flashSaleEnabled, promoBentoEnabled, featuresEnabled, marqueeEnabled }
+
+  // ─── ৫. ফুটার ও কপিরাইট লিংকস ───
+  footerConfig    Json?    // { description, address, phone, email, copyrightText, appStoreLink, googlePlayLink, socialLinks, aboutLinks, categoryLinks }
+
+  // ─── ৬. স্ট্যাটিক পেজ কনটেন্ট (About, Contact, Privacy, Terms, Return Policy) ───
+  pagesConfig     Json?    // { about: { title, content, heroImageUrl }, contact: { title, subtitle, mapEmbedUrl }, privacy: { title, content }, terms: { title, content }, returnPolicy: { title, content } }
+
+  updatedAt       DateTime @default(now()) @updatedAt
+}
+// ─── ৭. সেন্ট্রাল মিডিয়া গ্যালারি ও ফাইল আপলোড লাইব্রেরি ───
+model MediaAsset {
+  id         String   @id @default(uuid())
+  fileName   String   // e.g. "summer-electronics-sale.webp"
+  fileUrl    String   // e.g. "https://cdn.a2zoutletstore.com/banners/summer.webp"
+  mimeType   String   @default("image/webp")
+  fileSizeKb Int      @default(120)
+  folder     String   @default("general") // "banners", "products", "blogs", "brand_logos"
+  altText    String?  // এসইও অল্টার টেক্সট
+
+  uploadedBy String?  // যে অ্যাডমিন আপলোড করেছে
+  createdAt  DateTime @default(now())
+
+  @@index([folder])
+}

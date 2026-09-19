@@ -1,0 +1,213 @@
+// ─────────────────────────────────────────────────────────────
+// CENTRAL PLATFORM SETTINGS, PAYMENT GATEWAYS & NOTIFICATION CONFIG
+// ─────────────────────────────────────────────────────────────
+
+// ─── ১. জেনারেল স্টোর প্রোফাইল ও ব্র্যান্ডিং সেটিংস ───
+model StoreSetting {
+  id                   String   @id @default(uuid())
+
+  // ব্র্যান্ডিং ও কনটাক্ট
+  storeName            String   @default("A2Z Outlet Store")
+  tagline              String?  @default("Shop Global, Delivered Local")
+  logoUrl              String?  // মূল লোগো
+  logoWhiteUrl         String?  // ডার্ক মোডের সাদা লোগো
+  faviconUrl           String?
+
+  supportEmail         String   @default("support@a2zoutletstore.com")
+  supportPhone         String   @default("+8801700000000")
+  whatsappNumber       String?  @default("+8801700000000")
+  officeAddress        String?  @db.Text
+
+  // কারেন্সি ও লোকেল
+  defaultCurrency      String   @default("BDT") // BDT
+  baseCurrency         String   @default("USD") // USD
+  currencySymbol       String   @default("৳")   // ৳ বা $
+  defaultLanguage      String   @default("bn")  // bn or en
+
+  // সোশ্যাল মিডিয়া লিংকস
+  facebookUrl          String?
+  instagramUrl         String?
+  youtubeUrl           String?
+  tiktokUrl            String?
+
+  // মেইনটেন্যান্স মোড
+  isMaintenanceMode    Boolean  @default(false)
+  maintenanceMessage   String?  @db.Text
+
+  updatedAt            DateTime @default(now()) @updatedAt
+}
+
+// ─── ২. পেমেন্ট গেটওয়ে কনফিগারেশন ───
+model PaymentGatewaySetting {
+  id                     String   @id @default(uuid())
+
+  // বিকাশ (bKash Checkout)
+  isBkashActive          Boolean  @default(true)
+  bkashAppKey            String?
+  bkashAppSecret         String?
+  bkashUsername          String?
+  bkashPassword          String?
+  bkashFeePct            Float    @default(1.5) // ১.৫% গেটওয়ে ফি
+  isBkashSandbox         Boolean  @default(false)
+
+  // নগদ (Nagad)
+  isNagadActive          Boolean  @default(true)
+  nagadMerchantId        String?
+  nagadPublicKey         String?  @db.Text
+  nagadPrivateKey        String?  @db.Text
+  nagadFeePct            Float    @default(1.5)
+
+  // এসএসএলকমার্জ (SSLCommerz)
+  isSslcommerzActive     Boolean  @default(false)
+  sslcommerzStoreId      String?
+  sslcommerzStorePass    String?
+  isSslcommerzSandbox    Boolean  @default(false)
+
+  // স্ট্রাইপ (Stripe - আন্তর্জাতিক কার্ড)
+  isStripeActive         Boolean  @default(true)
+  stripePublishableKey   String?
+  stripeSecretKey        String?
+
+  // UddoktaPay (Local BDT)
+  isUddoktapayActive     Boolean  @default(false)
+  uddoktapayApiKey       String?
+  uddoktapayBaseUrl      String?
+
+  // ক্যাশ অন ডেলিভারি (COD)
+  isCodActive            Boolean  @default(true)
+  codMaxAmount           Float    @default(10000.0) // সর্বোচ্চ ১০,০০০ টাকা পর্যন্ত
+  codAllowedCities       String[] @default(["Dhaka"]) // শুধু ঢাকায় সিওডি
+
+  updatedAt              DateTime @default(now()) @updatedAt
+}
+
+// ─── ৩. এসএমএস, ইমেইল ও হোয়াটসঅ্যাপ গেটওয়ে সেটিংস ───
+model NotificationSetting {
+  id                  String   @id @default(uuid())
+
+  // SMTP ইমেইল কনফিগারেশন
+  smtpHost            String?  // e.g. "smtp.sendgrid.net" or "smtp.gmail.com"
+  smtpPort            Int      @default(587)
+  smtpUser            String?
+  smtpPassword        String?
+  senderEmail         String   @default("no-reply@a2zoutletstore.com")
+  senderName          String   @default("A2Z Outlet")
+  isSmtpActive        Boolean  @default(true)
+
+  // বাল্ক এসএমএস গেটওয়ে (Greenweb / Twilio / Onnorokom)
+  smsProvider         String   @default("greenweb")
+  smsApiKey           String?
+  smsSenderId         String?  // যেমন: "A2ZOUTLET" (মাস্কিং আইডি)
+  isSmsActive         Boolean  @default(true)
+
+  // হোয়াটসঅ্যাপ ক্লাউড এপিআই
+  isWhatsappActive    Boolean  @default(false)
+  whatsappApiKey      String?
+  whatsappPhoneNumber String?
+
+  // নোটিফিকেশন ও এসএমএস ট্রিগার অপশনস
+  sendOrderPlacedSms            Boolean  @default(true)
+  sendOrderShippedSms           Boolean  @default(true)
+  sendDeliverySms               Boolean  @default(true)
+
+  // ─── ইমেইল ট্রিগার কনফিগারেশন (Automated Email Event Triggers) ───
+  sendAuthVerifyEmail           Boolean  @default(true)  // রেজিস্ট্রেশনের পর ৬-সংখ্যার OTP কোড ইমেইল
+  sendWelcomeEmail              Boolean  @default(true)  // অ্যাকাউন্ট ভেরিফিকেশনের পর ওয়েলকাম ডিসকাউন্ট কুপন ইমেইল
+  sendPasswordResetEmail        Boolean  @default(true)  // পাসওয়ার্ড রিসেট লিংক ও ওটিপি ইমেইল
+  sendOrderPlacedEmail          Boolean  @default(true)  // অর্ডার কনফার্মেশন ও ডিজিটাল ইনভয়েস ইমেইল
+  sendPaymentSuccessEmail       Boolean  @default(true)  // পেমেন্ট সাকসেসফুল রিসিপ্ট ইমেইল
+  sendOrderShippedEmail         Boolean  @default(true)  // এয়ার ফ্লাইট ডিসপ্যাচ ও AWB ট্র্যাকিং ইমেইল
+  sendOutForDeliveryEmail       Boolean  @default(true)  // লোকাল কুরিয়ার হ্যান্ডওভার নোটিফিকেশন ইমেইল
+  sendOrderDeliveredEmail       Boolean  @default(true)  // সফল ডেলিভারি ও রিভিউ রিকোয়েস্ট ইমেইল
+  sendOrderCancelledEmail       Boolean  @default(true)  // অর্ডার ক্যানসেলেশন ও রিফান্ড নোটিফিকেশন ইমেইল
+  sendAbandonedCartEmail        Boolean  @default(true)  // কার্ট রিকভারি অটোমেশন রিমাইন্ডার ইমেইল
+  sendPriceDropEmail            Boolean  @default(true)  // উইশলিস্ট প্রাইস ড্রপ অ্যালার্ট ইমেইল
+  sendAdminNewOrderAlert        Boolean  @default(true)  // নতুন হাই-ভ্যালু অর্ডারের অ্যাডমিন অ্যালার্ট
+  adminNotificationEmail        String?  @default("admin@a2zoutletstore.com") // অ্যাডমিন অ্যালার্ট ইমেইল
+
+  updatedAt                     DateTime @default(now()) @updatedAt
+}
+
+// ─── ৪. ডায়নামিক Key-Value সিস্টেম সেটিংস ───
+model SystemSetting {
+  key         String   @id // e.g. "MIN_ORDER_VALUE", "AUTO_PRICING_ENABLED"
+  value       String   @db.Text
+  category    String   @default("general") // general, payment, scraper, logistics
+  description String?
+  isEncrypted Boolean  @default(false)
+
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  @@index([category])
+}
+// ─── ৫. ডায়নামিক ইমেইল টেমপ্লেট লাইব্রেরি ───
+model EmailTemplate {
+  id           String   @id @default(uuid())
+  code         String   @unique // e.g. "ORDER_CONFIRMATION", "ORDER_SHIPPED_AIR", "PASSWORD_RESET"
+  name         String   // e.g. "অর্ডার কনফার্মেশন ইমেইল"
+  subject      String   // e.g. "আপনার অর্ডার #{{orderNumber}} কনফার্ম হয়েছে!"
+
+  bodyHtml     String   @db.Text // সম্পূর্ণ রেসপন্সিভ HTML ইমেইল বডি
+  bodyText     String?  @db.Text // প্লেইন টেক্সট ব্যাকআপ
+  variables    Json?    // সাপোর্টেড ট্যাগস: ["customerName", "orderNumber", "totalAmount", "trackingUrl"]
+
+  senderName   String?  // স্পেসিফিক প্রেরকের নাম (e.g. "A2Z Orders")
+  senderEmail  String?  // e.g. "orders@a2zoutletstore.com"
+  isActive     Boolean  @default(true)
+  logs         NotificationLog[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  @@index([code])
+}
+// ─── ৬. ডায়নামিক এসএমএস টেমপ্লেট ───
+model SmsTemplate {
+  id           String   @id @default(uuid())
+  code         String   @unique // e.g. "SMS_ORDER_PLACED", "SMS_OUT_FOR_DELIVERY", "SMS_OTP"
+  name         String   // e.g. "অর্ডার প্লেসড এসএমএস"
+  content      String   @db.Text // e.g. "প্রিয় {{customerName}}, আপনার অর্ডার #{{orderNumber}} গ্রহণ করা হয়েছে। মোট: ৳{{totalAmount}}। ট্র্যাকিং: {{trackingUrl}}"
+  variables    Json?    // ["customerName", "orderNumber", "totalAmount"]
+  isActive     Boolean  @default(true)
+  logs         NotificationLog[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  @@index([code])
+}
+// ─── ৭. সেন্ট্রাল নোটিফিকেশন অডিট ও ডেলিভারি লগ্স ───
+model NotificationLog {
+  id              String         @id @default(uuid())
+  recipient       String         // ইমেইল এড্রেস অথবা মোবাইল নম্বর
+  channel         String         // "EMAIL" | "SMS" | "WHATSAPP"
+
+  templateCode    String?        // কোন টেমপ্লেট থেকে পাঠানো হয়েছে
+  emailTemplateId String?
+  emailTemplate   EmailTemplate? @relation(fields: [emailTemplateId], references: [id], onDelete: SetNull)
+
+  smsTemplateId   String?
+  smsTemplate     SmsTemplate?   @relation(fields: [smsTemplateId], references: [id], onDelete: SetNull)
+  subject         String?
+  contentSnapshot String         @db.Text // সেদিনের আসল মেসেজ
+  status          String         @default("SENT") // "SENT" | "DELIVERED" | "FAILED"
+  errorMessage    String?        @db.Text
+  sentAt          DateTime       @default(now())
+  @@index([recipient])
+  @@index([channel])
+  @@index([status])
+}
+// ─── ৮. লোকাল কুরিয়ার গেটওয়ে কনফিগারেশন (Pathao / Steadfast) ───
+model CourierGatewayConfig {
+  id           String   @id @default(uuid())
+  provider     String   @unique // "pathao", "steadfast", "redx", "paperfly"
+
+  clientId     String?
+  clientSecret String?
+  apiKey       String?
+  secretKey    String?
+  storeId      String?  // পাঠাও মার্চেন্ট স্টোর আইডি
+
+  isActive     Boolean  @default(true)
+  isSandbox    Boolean  @default(false)
+
+  updatedAt    DateTime @default(now()) @updatedAt
+
+  @@index([provider])
+}

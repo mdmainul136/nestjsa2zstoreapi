@@ -1,0 +1,201 @@
+// ─────────────────────────────────────────────────────────────
+// ORDERS, CHECKOUT, ACCOUNTING & WMS PARCEL FORWARDING
+// ─────────────────────────────────────────────────────────────
+
+// ─── ১. মূল অর্ডার মডেল ───
+model Order {
+  id                      String        @id @default(uuid())
+  orderNumber             String        @unique // e.g. "A2Z-2026-98124"
+  userId                  String?
+  user                    User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // ─── কাস্টমার ও ডেলিভারি তথ্য ───
+  customerName            String
+  customerEmail           String
+  customerPhone           String
+  shippingCity            String
+  shippingCountry         String        @default("BD")
+  shippingAddress         Json?         // { street, house, postalCode, area }
+  shippingMethod          String        @default("Standard Air Freight")
+
+  // ─── স্বচ্ছ আর্থিক হিসাব (Complete Transparent Accounting) ───
+  productSubtotal         Float         @default(0.0) // পণ্যের বেস দাম + লাভ
+  marketplaceShippingFee  Float         @default(0.0) // আমাজন থেকে ইউএস ওয়্যারহাউস খরচ
+  shippingFee             Float         @default(0.0) // আন্তর্জাতিক এয়ার ফ্রেইট চার্জ ($/kg)
+  localDeliveryFee        Float         @default(0.0) // বাংলাদেশে লোকাল কুরিয়ার চার্জ (৳৬০/৳১২০)
+  gatewayFee              Float         @default(0.0) // বিকাশ/স্ট্রাইপ অনলাইন ফি
+  taxAmount               Float         @default(0.0) // ভ্যাট ও কাস্টমস ট্যাক্স
+  discountAmount          Float         @default(0.0) // কুপন বা প্রোমো ছাড়
+  totalAmount             Float         @default(0.0) // কাস্টমারের মোট প্রদেয় টাকা
+
+  currency                String        @default("BDT")
+  exchangeRate            Float         @default(136.50) // সেদিনের ডলার রেটের স্থায়ী স্ন্যাপশট
+
+  // ─── পেমেন্ট ও গেটওয়ে ───
+  status                  OrderStatus   @default(PENDING)
+  paymentStatus           PaymentStatus @default(UNPAID)
+  paymentMethod           String?       // bkash, nagad, stripe, sslcommerz, cod
+  gatewayTransactionId    String?       // TrxID বা Charge ID
+  paymentDetails          Json?
+
+  // ─── মার্কেটপ্লেস সোর্সিং ও ইউএসএ ট্র্যাকিং ───
+  sourceName              String?       // amazon, walmart, sephora, nike
+  sourceOrderNumber       String?       // আমাজনের অর্ডার নম্বর
+  supplierTrackingNumber  String?       // ইউএসএ লোকাল ট্র্যাকিং নম্বর (USPS/UPS)
+
+  // ─── ওয়্যারহাউস ও ভ্যালু-অ্যাডেড সার্ভিসেস ───
+  warehouseId             String?
+  warehouse               ConsolidatorWarehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  consolidation           Boolean       @default(false) // একত্রীকরণ
+  repacking               Boolean       @default(false) // বক্স ফেলে হালকা করা
+  qualityCheck            Boolean       @default(false) // কিউসি চেক
+  photoCheck              Boolean       @default(false) // ছবি তুলে কাস্টমারকে পাঠানো
+
+  // ─── আন্তর্জাতিক ও লোকাল ট্র্যাকিং টাইমলাইন ───
+  trackingNumber          String?       // আমাদের নিজস্ব মাস্টার ট্র্যাকিং নম্বর
+  trackingStatus          String        @default("pending")
+  trackingHistory         Json?         // লাইভ টাইমলাইন ফিড
+  courierName             String?       // Pathao, Steadfast, RedX
+  courierTrackingCode     String?       // লোকাল কুরিয়ার ট্র্যাকিং কোড
+
+  customsEstimate         Float?        // কাস্টমস শুল্ক এস্টিমেট
+  notes                   String?       @db.Text
+  metadata                Json?
+
+  // ─── রিলেশনশিপসমূহ ───
+  items                   OrderItem[]
+  parcels                 Parcel[]
+  productRequests         ProductRequest[]
+  refundRequests          RefundRequest[]
+  paymentTransactions     PaymentTransaction[]
+  purchaseOrders          PurchaseOrder[]
+  supportTickets          SupportTicket[]
+  returnRequests          ReturnRequest[]
+  resaleListings          ResaleListing[]
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+
+  @@index([orderNumber])
+  @@index([status])
+  @@index([userId])
+  @@index([customerEmail])
+}
+
+// ─── ২. অর্ডারের ভেতরের পণ্যসমূহ (Permanent Immutable Snapshot) ───
+model OrderItem {
+  id            String    @id @default(uuid())
+  orderId       String
+  order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  productId     String?
+  product       Product?  @relation(fields: [productId], references: [id], onDelete: SetNull)
+  variantId     String?
+  variant       Variant?  @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  warehouseId   String?
+
+  // পার্মানেন্ট স্ন্যাপশট (ভবিষ্যতে প্রোডাক্টের দাম বা নাম চেঞ্জ হলেও এটি সুরক্ষিত থাকবে)
+  productTitle  String?   // সেদিনের পণ্যের আসল নাম
+  productImage  String?   // সেদিনের আসল ছবি
+  productSlug   String?
+  selectedColor String?   // নির্বাচিত কালার
+  selectedSize  String?   // নির্বাচিত সাইজ
+
+  quantity      Int       @default(1)
+  sourcePrice   Float     @default(0.0) // আমাজনের কেনা দামের স্ন্যাপশট
+  unitPrice     Float     // প্রতিটির বিক্রয়মূল্য
+  totalPrice    Float     // quantity * unitPrice
+  weightKg      Float     @default(0.1) // ওজন
+
+  createdAt     DateTime  @default(now())
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([variantId])
+}
+
+// ─── ৩. WMS ওয়্যারহাউস পার্সেল ট্র্যাকিং (Forwarding Hub Operations) ───
+model Parcel {
+  id                 String                 @id @default(uuid())
+  orderId            String?
+  order              Order?                 @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  customerEmail      String?
+
+  warehouseId        String
+  warehouse          ConsolidatorWarehouse  @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  supplierName       String?                // amazon, walmart
+  supplierTracking   String?                // ইউএসপিএস ট্র্যাকিং
+
+  weightKg           Float?
+  lengthCm           Float?
+  widthCm            Float?
+  heightCm           Float?
+  declaredValueUsd   Float                  @default(0.0)
+  description        String?
+
+  // Status: awaiting | received | qc_pass | qc_fail | consolidated | repacked | dispatched | delivered
+  status             String                 @default("awaiting")
+
+  // কিউসি ও ফটো চেক
+  qcDone             Boolean                @default(false)
+  qcPassed           Boolean?
+  qcNotes            String?                @db.Text
+  qcBy               String?
+  qcAt               DateTime?
+  photoUrls          String[]               @default([]) // আনবক্সিং ছবির গ্যালারি
+
+  // কনসোলিডেশন ও রিপ্যাকিং
+  isConsolidated     Boolean                @default(false)
+  consolidatedWith   Json?
+  parentParcelId     String?
+  isRepacked         Boolean                @default(false)
+  repackedWeightKg   Float?
+
+  // ডিসপ্যাচ ও আন্তর্জাতিক ফ্লাইট
+  dispatchCarrier    String?                // e.g. "Emirates SkyCargo", "FedEx"
+  dispatchTracking   String?                // মাস্টার এয়ারওয়েবিল (AWB)
+  dispatchLabelB64   String?                @db.Text // লেবেল প্রিন্ট ডাটা
+  dispatchedAt       DateTime?
+  dispatchedBy       String?
+  manifestId         String?
+  manifest           CargoManifest?         @relation(fields: [manifestId], references: [id], onDelete: SetNull)
+  scanLogs           BarcodeScanLog[]
+  receivedAt         DateTime?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  @@index([warehouseId])
+  @@index([status])
+  @@index([orderId])
+  @@index([manifestId])
+}
+// ─── ৪. প্রোডাক্ট রিটার্ন ও এক্সচেঞ্জ ট্র্যাকিং (RMA) ───
+model ReturnRequest {
+  id               String       @id @default(uuid())
+  rmaNumber        String       @unique // e.g. "RMA-2026-0042"
+
+  orderId          String
+  order            Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  productId        String
+  product          Product      @relation(fields: [productId], references: [id])
+
+  userId           String?
+  user             User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  reason           String       // "DAMAGED_ITEM", "WRONG_SIZE", "DEFECTIVE", "NOT_AS_DESCRIBED"
+  explanation      String       @db.Text
+  photoUrls        String[]     @default([]) // নষ্ট পণ্যের ছবি/ভিডিও লিংক
+
+  status           String       @default("PENDING") // "PENDING", "APPROVED", "ITEM_RECEIVED", "REPLACED", "REFUNDED", "REJECTED"
+  returnCarrier    String?      // লোকাল কুরিয়ার
+  returnTracking   String?      // রিটার্ন ট্র্যাকিং কোড
+
+  adminNotes       String?      @db.Text
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([rmaNumber])
+  @@index([orderId])
+  @@index([status])
+}

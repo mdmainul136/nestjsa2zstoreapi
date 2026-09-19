@@ -1,0 +1,104 @@
+// ─────────────────────────────────────────────────────────────
+// CUSTOMER HELPDESK, TICKETS, MESSAGES & LIVE CHAT CRM
+// ─────────────────────────────────────────────────────────────
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_ON_CUSTOMER
+  RESOLVED
+  CLOSED
+}
+
+// ─── ১. কাস্টমার সাপোর্ট টিকেট ───
+model SupportTicket {
+  id                 String          @id @default(uuid())
+  ticketNumber       String          @unique // e.g. "TCK-2026-8912"
+
+  userId             String?
+  user               User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  orderId            String?
+  order              Order?          @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  customerName       String
+  customerEmail      String
+  customerPhone      String?
+
+  subject            String
+  category           String          @default("TRACKING") // "TRACKING", "DAMAGED_ITEM", "CUSTOMS", "PAYMENT", "GENERAL"
+  priority           TicketPriority  @default(MEDIUM)
+  status             TicketStatus    @default(OPEN)
+
+  assignedStaffId    String?         // যে সাপোর্ট এজেন্ট হ্যান্ডেল করছে
+  assignedStaffName  String?
+
+  messages           TicketMessage[]
+
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@index([userId])
+  @@index([ticketNumber])
+  @@index([status])
+}
+
+// ─── ২. টিকেটের ভেতরের মেসেজ ও এটাচমেন্ট ───
+model TicketMessage {
+  id             String        @id @default(uuid())
+  ticketId       String
+  ticket         SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  senderType     String        // "CUSTOMER" | "STAFF" | "SYSTEM"
+  senderName     String
+  message        String        @db.Text
+  attachmentUrls String[]      @default([]) // কাস্টমারের পাঠানো ছবি/স্ক্রিনশট
+
+  createdAt      DateTime      @default(now())
+
+  @@index([ticketId])
+}
+
+// ─── ৩. স্টোরফ্রন্ট লাইভ চ্যাট সেশন ───
+model LiveChatSession {
+  id           String        @id @default(uuid())
+  sessionId    String        @unique // সকেট রুম আইডি
+
+  userId       String?
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  visitorName  String?       @default("Guest Visitor")
+  visitorEmail String?
+  visitorPhone String?
+  ipAddress    String?
+
+  status       String        @default("ACTIVE") // "ACTIVE", "ENDED"
+  messages     ChatMessage[]
+
+  startedAt    DateTime      @default(now())
+  endedAt      DateTime?
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ─── ৪. লাইভ চ্যাট মেসেজ ───
+model ChatMessage {
+  id         String          @id @default(uuid())
+  sessionId  String
+  session    LiveChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  senderType String          // "VISITOR" | "AGENT" | "BOT"
+  message    String          @db.Text
+
+  createdAt  DateTime        @default(now())
+
+  @@index([sessionId])
+}

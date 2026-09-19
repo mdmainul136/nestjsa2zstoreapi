@@ -1,0 +1,72 @@
+// ─────────────────────────────────────────────────────────────
+// CATEGORY, HIERARCHY & AI TAXONOMY MAPPINGS
+// ─────────────────────────────────────────────────────────────
+
+model Category {
+  id              String              @id @default(uuid())
+  name            String              // যেমন: "Smartphones", "Skincare"
+  slug            String              @unique // যেমন: "smartphones"
+  icon            String?             // আইকন ক্লাস
+  imageUrl        String?             // ক্যাটাগরি থাম্বনেইল
+  description     String?             @db.Text
+  displayOrder    Int                 @default(0) // সাজানোর সিরিয়াল
+  isPublished     Boolean             @default(true)
+  isFeatured      Boolean             @default(false) // হোমপেজে পপুলার ক্যাটাগরিতে শো করবে কি না
+
+  // ─── ১. ইন্টেলিজেন্ট কাস্টমস ও এসইও ───
+  defaultHsCode   String?             // e.g. "8518.30" (অটো কাস্টমস শুল্ক হিসাবের জন্য)
+  seoTemplate     String?             // প্রোগ্রামেটিক এসইও মেটা টেমপ্লেট
+
+  // ─── ২. ৩-লেভেল হায়ারার্কি (Parent > Subcategory > Child) ───
+  parentId        String?
+  parent          Category?           @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children        Category[]          @relation("CategoryHierarchy")
+
+  // ─── ৩. রিলেশনশিপসমূহ ───
+  products        Product[]           // এই ক্যাটাগরির সব পণ্য
+  pricingRule     PricingRule?        // এই ক্যাটাগরির জন্য কাস্টমস ট্যাক্স ও প্রফিট মার্জিন
+  attributes      CategoryAttribute[] // এই ক্যাটাগরির ফিল্টার অ্যাট্রিবিউটসমূহ (RAM, Storage, Size)
+  seo             SeoMetadata? // 👉 SEO রিলেশন
+  Coupon          Coupon[]
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([slug])
+  @@index([parentId])
+}
+
+model ScrapedCategoryMapping {
+  id                 String   @id @default(uuid())
+  rawCategory        String   // স্ক্র্যাপ হয়ে আসা কাঁচা ক্যাটাগরি পাথ
+  source             String   // amazon, walmart, sephora
+  mappedCategory     String?  // আমাদের সাইটের মূল ক্যাটাগরি
+  mappedSubcategory    String?  // সাব-ক্যাটাগরি
+  mappedSubSubcat      String?  // চাইল্ড ক্যাটাগরি
+  mappedSubSubcategory String?  @map("mapped_sub_subcategory") // চাইল্ড ক্যাটাগরি অল্টারনেট
+  isPublished          Boolean  @default(true) // ফ্রন্টএন্ডে শো করবে কি না
+
+  // ─── এআই অটো-ম্যাপিং ও কনফিডেন্স ───
+  confidenceScore      Float    @default(1.0) // 0.00 to 1.00 (AI স্কোর)
+  isAutoApproved       Boolean  @default(true) // ৯০%+ হলে অটো এপ্রুভড
+  isManual             Boolean  @default(false)
+
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([source, rawCategory])
+  @@index([rawCategory])
+  @@index([source])
+}
+
+// ─── ৩. ফ্রন্টএন্ড ক্যাটাগরি ব্যানার ও এসইও মেটাডাটা ───
+model CategoryMetadata {
+  categorySlug   String    @id
+  imageUrl       String?
+  seoTitle       String?
+  seoDescription String?   @db.Text
+  icon           String?
+  isPublished    Boolean   @default(true)
+  displayOrder   Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now()) @updatedAt
+}

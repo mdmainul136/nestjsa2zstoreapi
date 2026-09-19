@@ -1,0 +1,186 @@
+// ─────────────────────────────────────────────────────────────
+// ENTERPRISE AI SEO ENGINE, PRODUCT SCHEMAS & INSTANT INDEXING
+// ─────────────────────────────────────────────────────────────
+
+// ─── ১. গ্লোবাল অর্গানাইজেশন ও স্টোর স্কিমা ───
+model OrganizationSchema {
+  id                 String   @id @default(uuid())
+  legalName          String   @default("A2Z Outlet Store LLC")
+  brandName          String   @default("A2Z Outlet")
+  url                String   @default("https://a2zoutletstore.com")
+  logoUrl            String   // হাই-রেজোলিউশন লোগো
+  supportEmail       String   @default("support@a2zoutletstore.com")
+  supportPhone       String   @default("+8801700000000")
+
+  // সোশ্যাল মিডিয়া লিংকসমূহ (Google Knowledge Panel এর জন্য)
+  sameAsLinks        String[] @default([]) // Facebook, Instagram, YouTube, Twitter URLs
+
+  // পেমেন্ট ও কারেন্সি সাপোর্ট
+  currenciesAccepted String   @default("BDT, USD")
+  paymentAccepted    String   @default("bKash, Nagad, Credit Card, Cash on Delivery")
+
+  // রিটার্ন পলিসি স্কিমা
+  returnDays         Int      @default(7)
+  returnPolicyUrl    String?  @default("https://a2zoutletstore.com/return-policy")
+
+  updatedAt          DateTime @default(now()) @updatedAt
+}
+
+// ─── ২. প্রতিটি প্রোডাক্ট, ভ্যারিয়েন্ট ও পেজের এআই স্কিমা মেটাডাটা ───
+model SeoMetadata {
+  id                 String    @id @default(uuid())
+
+  // ─── সার্চ ইঞ্জিন মেটা ট্যাগস ───
+  metaTitle          String?   // Google SERP Title
+  metaDescription    String?   @db.Text
+  metaKeywords       String?
+  focusKeyword       String?   // মূল কীওয়ার্ড (e.g. "iPhone 15 Pro Max USA to BD")
+  secondaryKeywords  String[]  @default([])
+  seoScore           Int?      @default(0) // 0-100 Content SEO Score
+
+  // ─── রোবটস ও ক্যানোনিক্যাল ───
+  canonicalUrl       String?
+  robots             String?   @default("index, follow")
+  isNoIndex          Boolean   @default(false)
+  isNoFollow         Boolean   @default(false)
+  maxImagePreview    String?   @default("large")
+  maxSnippet         Int?      @default(-1)
+
+  // ─── সোশ্যাল মিডিয়া (OpenGraph & Twitter Card) ───
+  ogTitle            String?
+  ogDescription      String?   @db.Text
+  ogImage            String?
+  ogImageAlt         String?
+  ogType             String?   @default("product")
+  twitterCard        String?   @default("summary_large_image")
+
+  // ─── ৩. গুগল ও এআই স্ট্রাকচার্ড স্কিমা (JSON-LD) ───
+  schemaType         String?   @default("Product") // Product, ProductGroup, FAQPage, Article
+
+  // Single & Variant Product Group Schema
+  productGroupId     String?   // ভ্যারিয়েন্ট গ্রুপের আইডি
+  variesByProperties String[]  @default(["https://schema.org/size", "https://schema.org/color"])
+
+  // AI Grounding & Voice Search (Google Assistant, Perplexity, SearchGPT)
+  aiSummary          String?   @db.Text // এআই ওভারভিউয়ের জন্য সংক্ষেপিত উত্তর
+  speakableSelectors String[]  @default(["h1", ".product-summary"]) // ভয়েস সার্চের জন্য সিলেক্টর
+  faqSchema          Json?     // প্রশ্নোত্তর স্কিমা: [{ q: "...", a: "..." }]
+  breadcrumbJson     Json?     // ব্রেডক্রাম্ব নেভিগেশন স্কিমা
+  customSchemaJson   Json?     // সম্পূর্ণ কাস্টম JSON-LD ওভাররাইড
+
+  // ─── ৫টি দ্বিমুখী রিলেশনশিপ (Bidirectional Relations) ───
+
+  // ১. মেইন প্রোডাক্ট রিলেশন
+  productId          String?   @unique
+  product            Product?  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  // ২. নির্দিষ্ট ভ্যারিয়েন্ট রিলেশন
+  variantId          String?   @unique
+  variant            Variant?  @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  // ৩. ক্যাটাগরি রিলেশন
+  categoryId         String?   @unique
+  category           Category? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  // ৪. ব্র্যান্ড রিলেশন
+  brandId            String?   @unique
+  brand              Brand?    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  // ৫. ব্লগ পোস্ট রিলেশন
+  blogPostId         String?   @unique
+  blogPost           BlogPost? @relation(fields: [blogPostId], references: [id], onDelete: Cascade)
+
+  customRoute        String?   // স্ট্যাটিক পেজের জন্য (e.g. "/shop", "/about-us")
+
+  // এআই অডিট ও ইনডেক্সিং স্ট্যাটাস
+  aiOptimized        Boolean   @default(false)
+  lastAuditedAt      DateTime?
+
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([customRoute])
+  @@index([focusKeyword])
+}
+
+// ─── ৩. এআই ও রিয়েল-টাইম ইনস্ট্যান্ট ইনডেক্সিং সিস্টেম (IndexNow & Google API) ───
+model IndexingConfig {
+  id                   String   @id @default(uuid())
+
+  // IndexNow Key (Bing, Yandex, Seznam এ সাথে সাথে সাবমিট করার কি)
+  indexNowKey          String?  // e.g. "a2z_indexnow_key_98124"
+  indexNowKeyLocation  String?  // e.g. "https://a2zoutletstore.com/a2z_indexnow_key_98124.txt"
+  isIndexNowEnabled    Boolean  @default(true)
+
+  // Google Indexing API (Service Account JSON Key)
+  googleServiceAccount Json?    // Google Cloud Service Account Credentials
+  isGoogleApiEnabled   Boolean  @default(true)
+
+  // অটো-ইনডেক্স ট্রিগারস
+  autoIndexOnCreate    Boolean  @default(true) // নতুন প্রোডাক্ট পাবলিশ হলেই সাবমিট হবে
+  autoIndexOnPriceDrop Boolean  @default(true) // দাম কমলেই গুগলে আপডেট পাঠাবে
+
+  // ─── সার্চ এলগরিদম র‍্যাংকিং ওয়েইটস ও ফাজি কনফিগ ───
+  titleWeight          Int      @default(40) // টাইটেল ম্যাচ ওয়েইট (৪০%)
+  asinSkuWeight        Int      @default(25) // ASIN ও SKU হুবহু ম্যাচ ওয়েইট (২৫%)
+  brandWeight          Int      @default(20) // ব্র্যান্ড অ্যাসোসিয়েশন ওয়েইট (২০%)
+  popularityWeight     Int      @default(15) // সেলস ও রিভিউ রেটিং ওয়েইট (১৫%)
+  typoTolerance        Boolean  @default(true) // ফাজি ট্রাইগ্রাম টাইপো কারেকশন
+  instantSuggest       Boolean  @default(true) // টাইপ-অ্যাহেড সাজেশন অ্যাক্টিভ
+
+  updatedAt            DateTime @default(now()) @updatedAt
+}
+
+model IndexingLog {
+  id          String   @id @default(uuid())
+  url         String   // যে ইউআরএলটি ইনডেক্স করতে পাঠানো হয়েছে
+  engine      String   // "google" | "indexnow"
+  action      String   // "URL_UPDATED" | "URL_DELETED"
+  httpStatus  Int      // 200 (Success), 400, 429
+  responseMsg String?  @db.Text
+  submittedAt DateTime @default(now())
+
+  @@index([url])
+  @@index([engine])
+}
+
+// ─── ৪. ইউআরএল ৩০১/৩০২ রিডাইরেক্ট ম্যানেজার ───
+model RedirectRule {
+  id          String    @id @default(uuid())
+  sourcePath  String    @unique
+  targetPath  String
+  statusCode  Int       @default(301)
+  isActive    Boolean   @default(true)
+  hitCount    Int       @default(0)
+  lastHitAt   DateTime?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([sourcePath])
+}
+
+// ─── ৫. স্বয়ংক্রিয় ৪০৪ এরর ট্র্যাকার ও ব্রোকেন লিংক মনিটর ───
+model BrokenLinkLog {
+  id          String   @id @default(uuid())
+  brokenUrl   String   @unique
+  referrerUrl String?
+  userAgent   String?
+  hitCount    Int      @default(1)
+  isResolved  Boolean  @default(false)
+
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now()) @updatedAt
+
+  @@index([isResolved])
+}
+// ─── ৭. সার্চ কীওয়ার্ড ও জিরো-রেজাল্ট অ্যানালিটিক্স ───
+model SearchQueryLog {
+  id           String   @id @default(uuid())
+  queryText    String   // যেমন: "Nike Air Jordan 4", "Cerave Moisturizer"
+  resultsCount Int      @default(0) // মোট কতটি পণ্য খুঁজে পাওয়া গেছে (0 হলে জিরো-রেজাল্ট)
+  userId       String?
+  ipAddress    String?
+
+  createdAt    DateTime @default(now())
+
+  @@index([queryText])
+  @@index([resultsCount])
+  @@index([createdAt])
+}
