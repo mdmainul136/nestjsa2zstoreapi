@@ -20,6 +20,8 @@ async function bootstrap() {
       const url = req.url || '';
       if (
         url &&
+        url !== '/' &&
+        !url.startsWith('/health') &&
         !url.startsWith('/api') &&
         !url.startsWith('/docs') &&
         !url.startsWith('/uploads') &&
@@ -54,17 +56,28 @@ async function bootstrap() {
     decorateReply: false,
   });
 
-  // Auto-rewrite routes missing the /api prefix (supports extension calls like /catalog/extension/sync)
+  // Direct Healthcheck and Root Endpoints (200 OK for Traefik & Docker)
   const fastifyInstance = app.getHttpAdapter().getInstance();
+  fastifyInstance.get('/', (_req: any, reply: any) => {
+    reply.send({ status: 'ok', service: 'a2z-backend-api', timestamp: new Date().toISOString() });
+  });
+  fastifyInstance.get('/health', (_req: any, reply: any) => {
+    reply.send({ status: 'ok', uptime: process.uptime() });
+  });
+
+  // Auto-rewrite routes missing the /api prefix (supports extension calls like /catalog/extension/sync)
   fastifyInstance.addHook('onRequest', (request: any, reply: any, done: any) => {
+    const rawUrl = request.raw.url || '';
     if (
-      request.raw.url &&
-      !request.raw.url.startsWith('/api') &&
-      !request.raw.url.startsWith('/docs') &&
-      !request.raw.url.startsWith('/uploads') &&
-      !request.raw.url.startsWith('/favicon')
+      rawUrl &&
+      rawUrl !== '/' &&
+      !rawUrl.startsWith('/health') &&
+      !rawUrl.startsWith('/api') &&
+      !rawUrl.startsWith('/docs') &&
+      !rawUrl.startsWith('/uploads') &&
+      !rawUrl.startsWith('/favicon')
     ) {
-      request.raw.url = `/api${request.raw.url}`;
+      request.raw.url = `/api${rawUrl}`;
     }
     done();
   });

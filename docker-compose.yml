@@ -63,7 +63,7 @@ services:
       - "traefik.http.routers.a2z-api.service=a2z-api-svc"
       - "traefik.http.services.a2z-api-svc.loadbalancer.server.port=5001"
       - "traefik.http.services.a2z-api-svc.loadbalancer.passhostheader=true"
-      - "traefik.http.services.a2z-api-svc.loadbalancer.healthcheck.path=/"
+      - "traefik.http.services.a2z-api-svc.loadbalancer.healthcheck.path=/health"
       - "traefik.http.services.a2z-api-svc.loadbalancer.healthcheck.interval=10s"
       - "traefik.http.services.a2z-api-svc.loadbalancer.healthcheck.timeout=3s"
 
