@@ -14,7 +14,6 @@ services:
       context: .
       dockerfile: Dockerfile
     image: a2z-api:latest
-    restart: unless-stopped
     expose:
       - "5001"
     environment:
@@ -46,9 +45,9 @@ services:
           cpus: '0.25'
           memory: 256M
       restart_policy:
-        condition: any
+        condition: on-failure
         delay: 5s
-        max_attempts: 3
+        max_attempts: 5
         window: 120s
       update_config:
         parallelism: 1
