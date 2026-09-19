@@ -48,8 +48,7 @@ RUN mkdir -p /app/uploads
 
 EXPOSE 5001
 
-# Healthcheck for Dokploy / Traefik Load Balancer
 HEALTHCHECK --interval=20s --timeout=5s --start-period=30s --retries=3 \
-  CMD curl -f http://localhost:5001/api/storefront/cms/content || exit 1
+  CMD curl -f http://localhost:5001/ || exit 1
 
 CMD ["node", "dist/main.js"]

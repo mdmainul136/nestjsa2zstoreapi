@@ -1,9 +1,9 @@
 version: '3.8'
 
 # ==============================================================================
-# SERVICE: NestJS Backend API (Independent Service)
+# Independent Standalone Stack for NestJS A2Z Store API
 # Repository: https://github.com/mdmainul136/nestjsa2zstoreapi
-# Domain: https://api.a2zoutletstore.com
+# Public API Domain: https://api.a2zoutletstore.com
 # Port: 5001
 # ==============================================================================
 
@@ -32,12 +32,8 @@ services:
       - UDDOKTAPAY_API_KEY=${UDDOKTAPAY_API_KEY:-982d381360a69d419689740d9f2e26ce36fb7a50}
     volumes:
       - uploads_data:/app/uploads
-    networks:
-      - default
-      - dokploy-network
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=dokploy-network"
       - "traefik.http.routers.a2z-api.rule=Host(`api.a2zoutletstore.com`)"
       - "traefik.http.routers.a2z-api.entrypoints=websecure"
       - "traefik.http.routers.a2z-api.tls.certresolver=letsencrypt"
@@ -47,7 +43,3 @@ services:
 volumes:
   uploads_data:
     driver: local
-
-networks:
-  dokploy-network:
-    external: true
