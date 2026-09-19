@@ -1,5 +1,5 @@
 # ─── 1. Build Stage ───
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -7,26 +7,28 @@ WORKDIR /app
 RUN apk add --no-cache openssl libc6-compat
 
 COPY package*.json ./
+COPY .npmrc ./
 COPY prisma.config.ts ./
 COPY prisma ./prisma/
 
 # Install all dependencies (including devDependencies for build)
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 
 COPY tsconfig*.json nest-cli.json ./
 COPY src ./src
 
-# Generate Prisma Client for Linux Alpine
+# Generate Prisma Client for Linux Alpine (dummy DATABASE_URL for build-time generation)
+ENV DATABASE_URL="postgresql://postgres:postgres@localhost:5432/placeholder?schema=public"
 RUN npx prisma generate
 
 # Build NestJS production bundle
 RUN npm run build
 
 # Remove development dependencies to keep image size small
-RUN npm prune --production
+RUN npm prune --production --legacy-peer-deps
 
 # ─── 2. Production Runner Stage ───
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
 WORKDIR /app
 

@@ -1,5 +1,3 @@
-version: '3.8'
-
 # ==============================================================================
 # High-Availability Load Balanced Stack for NestJS A2Z Store API
 # Features:
