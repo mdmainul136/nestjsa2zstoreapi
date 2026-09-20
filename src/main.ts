@@ -77,7 +77,7 @@ async function bootstrap() {
     // Auto-sync fallback from existing storefront repository if missing on this node
     try {
       const remoteUrl = `https://a2zoutletstore.com/uploads/${encodeURIComponent(filename)}`;
-      const remoteRes = await fetch(remoteUrl);
+      const remoteRes = await fetch(remoteUrl, { signal: AbortSignal.timeout(3000) });
       if (remoteRes.ok) {
         const buffer = Buffer.from(await remoteRes.arrayBuffer());
         fs.writeFile(localPath, buffer, () => {});
