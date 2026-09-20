@@ -38,10 +38,12 @@ export class PaymentsService {
 
     const appUrl = this.configService.get<string>('APP_URL') || 'http://localhost:5001';
 
+    const resolvedAmount = (amount !== undefined && amount !== null && Number(amount) > 0) ? Number(amount) : order.totalAmount;
+
     const paymentData = {
       full_name: customer_name || order.customerName,
       email: customer_email || order.customerEmail,
-      amount: amount.toString(),
+      amount: (Math.round(resolvedAmount * 100) / 100).toFixed(2),
       metadata: {
         order_id: order.id,
       },

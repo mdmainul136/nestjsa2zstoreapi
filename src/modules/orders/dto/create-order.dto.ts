@@ -1,8 +1,9 @@
-import {
+﻿import {
   IsArray,
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsNumber,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -18,6 +19,10 @@ export class OrderItemDto {
 
   @IsNotEmpty()
   quantity: number;
+
+  @IsOptional()
+  @IsNumber()
+  unitPrice?: number;
 }
 
 export class CreateOrderDto {
@@ -47,15 +52,31 @@ export class CreateOrderDto {
 
   @IsOptional()
   @IsString()
-  paymentMethod?: string; // bkash, nagad, stripe, cod
+  paymentMethod?: string;
 
   @IsOptional()
   @IsString()
-  couponCode?: string; // ডিসকাউন্ট কুপন
+  couponCode?: string;
 
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsNumber()
+  productSubtotal?: number;
+
+  @IsOptional()
+  @IsNumber()
+  localDeliveryFee?: number;
+
+  @IsOptional()
+  @IsNumber()
+  totalAmount?: number;
+
+  @IsOptional()
+  @IsString()
+  currency?: string;
 
   @IsArray()
   @ValidateNested({ each: true })

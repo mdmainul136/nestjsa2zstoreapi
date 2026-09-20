@@ -40,7 +40,9 @@ export class OrdersService {
         throw new NotFoundException(`প্রোডাক্ট পাওয়া যায়নি: ${item.productId}`);
       }
 
-      let unitPrice = product.sellingPrice;
+      let unitPrice = typeof item.unitPrice === 'number' && item.unitPrice > 0
+        ? item.unitPrice
+        : product.sellingPrice;
       let selectedSize: string | null = null;
       let selectedColor: string | null = null;
       let itemImage = product.images[0] || '';
@@ -48,7 +50,9 @@ export class OrdersService {
       if (item.variantId) {
         const variant = product.variants.find((v) => v.id === item.variantId);
         if (variant) {
-          if (variant.sellingPrice) unitPrice = variant.sellingPrice;
+          if (!(typeof item.unitPrice === 'number' && item.unitPrice > 0) && variant.sellingPrice) {
+            unitPrice = variant.sellingPrice;
+          }
           selectedSize = variant.size;
           selectedColor = variant.color;
           if (variant.imageUrl) itemImage = variant.imageUrl;
@@ -75,10 +79,10 @@ export class OrdersService {
       });
     }
 
-    // লোকাল ডেলিভারি ফি (ঢাকার ভেতর ৳৭০, বাইরে ৳১৩০)
-    const localDeliveryFee = dto.shippingCity.toLowerCase().includes('dhaka')
-      ? 70.0
-      : 130.0;
+        // localDeliveryFee (honors checkout-passed fee, e.g. Self-Pickup 0)
+    const localDeliveryFee = typeof dto.localDeliveryFee === 'number'
+      ? dto.localDeliveryFee
+      : (dto.shippingCity.toLowerCase().includes('dhaka') ? 70.0 : 130.0);
 
     // কুপন ডিসকাউন্ট হিসাব
     let discountAmount = 0.0;
@@ -95,10 +99,20 @@ export class OrdersService {
       }
     }
 
-    const totalAmount = Math.max(
+    const finalSubtotal = typeof dto.productSubtotal === 'number' && dto.productSubtotal > 0
+      ? dto.productSubtotal
+      : productSubtotal;
+
+    const calculatedTotal = Math.max(
       0,
-      productSubtotal + localDeliveryFee - discountAmount,
+      finalSubtotal + localDeliveryFee - discountAmount,
     );
+
+    const totalAmount = typeof dto.totalAmount === 'number' && dto.totalAmount > 0
+      ? dto.totalAmount
+      : calculatedTotal;
+
+    const currency = (dto.currency || 'BDT').toUpperCase();
 
     // ডিফল্ট ইউএসএ ওয়্যারহাউস খোঁজা
     const defaultWarehouse = await this.prisma.consolidatorWarehouse.findFirst({
@@ -116,11 +130,11 @@ export class OrdersService {
         shippingCity: dto.shippingCity,
         shippingCountry: 'BD',
         shippingAddress: dto.shippingAddress as any,
-        productSubtotal,
+        productSubtotal: finalSubtotal,
         localDeliveryFee,
         discountAmount,
         totalAmount,
-        currency: 'BDT',
+        currency,
         paymentMethod: dto.paymentMethod || 'cod',
         status: 'PENDING',
         paymentStatus: 'UNPAID',
@@ -201,6 +215,7 @@ export class OrdersService {
       message: 'অর্ডার সফলভাবে সম্পন্ন হয়েছে!',
       orderNumber: order.orderNumber,
       totalAmount: order.totalAmount,
+      currency: order.currency,
       trackingNumber: order.trackingNumber,
       orderId: order.id,
     };
