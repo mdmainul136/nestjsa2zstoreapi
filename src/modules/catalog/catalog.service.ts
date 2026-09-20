@@ -2681,11 +2681,12 @@ export class CatalogService {
     if (!product) throw new NotFoundException(`Product ID "${productId}" not found`);
 
     const appUrl = process.env.APP_URL || '';
+    const cdnUrl = process.env.CDN_URL || process.env.MEDIA_CDN_URL || '';
     const isExternal = (url?: string | null) => {
       if (!url || typeof url !== 'string') return false;
       const u = url.trim();
       if (!u.startsWith('http://') && !u.startsWith('https://') && !u.startsWith('//')) return false;
-      if (u.includes('/uploads/') || u.startsWith(appUrl)) return false;
+      if (u.includes('/uploads/') || (appUrl && u.startsWith(appUrl)) || (cdnUrl && u.startsWith(cdnUrl))) return false;
       return true;
     };
 

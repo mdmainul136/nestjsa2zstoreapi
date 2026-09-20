@@ -138,7 +138,8 @@ export class MediaService {
     await fs.promises.writeFile(filePath, buffer);
 
     const fileSizeKb = Math.ceil(buffer.length / 1024);
-    const appUrl = process.env.APP_URL;
+    const cdnUrl = process.env.CDN_URL || process.env.MEDIA_CDN_URL;
+    const appUrl = cdnUrl || process.env.APP_URL;
     const fileUrl = appUrl ? `${appUrl.replace(/\/+$/, '')}/uploads/${fileName}` : `/uploads/${fileName}`;
 
     return this.prisma.mediaFile.create({
@@ -146,7 +147,7 @@ export class MediaService {
         fileName,
         originalName,
         fileUrl,
-        storageProvider: 'local',
+        storageProvider: cdnUrl ? 'cdn' : 'local',
         mimeType,
         fileSizeKb,
         folderId: folderId || null,
@@ -178,9 +179,10 @@ export class MediaService {
       imageUrl = `https:${imageUrl}`;
     }
 
-    // লোকাল ইউআরএল হলে রি-ডাউনলোড করার প্রয়োজন নেই
+    // লোকাল বা সিডিএন ইউআরএল হলে রি-ডাউনলোড করার প্রয়োজন নেই
+    const cdnUrl = process.env.CDN_URL || process.env.MEDIA_CDN_URL;
     const appUrl = process.env.APP_URL || 'http://localhost:5001';
-    if (imageUrl.includes('/uploads/') || imageUrl.startsWith(appUrl)) {
+    if (imageUrl.includes('/uploads/') || imageUrl.startsWith(appUrl) || (cdnUrl && imageUrl.startsWith(cdnUrl))) {
       const existing = await this.prisma.mediaFile.findFirst({
         where: { fileUrl: imageUrl },
       });
