@@ -50,11 +50,48 @@ async function bootstrap() {
     },
   });
 
-  await app.register(fastifyStatic as any, {
-    root: uploadsDir,
-    prefix: '/uploads/',
-    decorateReply: false,
-  });
+  // ─── Direct Uploads Streamer with Auto-Sync Fallback ───
+  const serveUploadWithFallback = async (req: any, reply: any) => {
+    const filename = req.params.filename;
+    if (!filename || filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+      return reply.code(400).send({ error: 'Invalid filename' });
+    }
+
+    const localPath = path.join(uploadsDir, filename);
+    if (fs.existsSync(localPath)) {
+      const ext = path.extname(filename).toLowerCase();
+      const mimeTypes: Record<string, string> = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.webp': 'image/webp',
+        '.gif': 'image/gif',
+        '.svg': 'image/svg+xml',
+        '.pdf': 'application/pdf',
+      };
+      reply.header('Content-Type', mimeTypes[ext] || 'application/octet-stream');
+      reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+      return reply.send(fs.createReadStream(localPath));
+    }
+
+    // Auto-sync fallback from existing storefront repository if missing on this node
+    try {
+      const remoteUrl = `https://a2zoutletstore.com/uploads/${encodeURIComponent(filename)}`;
+      const remoteRes = await fetch(remoteUrl);
+      if (remoteRes.ok) {
+        const buffer = Buffer.from(await remoteRes.arrayBuffer());
+        fs.writeFile(localPath, buffer, () => {});
+        const contentType = remoteRes.headers.get('content-type') || 'image/jpeg';
+        reply.header('Content-Type', contentType);
+        reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+        return reply.send(buffer);
+      }
+    } catch (err: any) {
+      logger.warn(`Failed to pull remote upload asset: ${filename} - ${err?.message}`);
+    }
+
+    return reply.code(404).send({ error: 'File not found' });
+  };
 
   // Direct Healthcheck and Root Endpoints (200 OK for Traefik & Docker)
   const fastifyInstance = app.getHttpAdapter().getInstance();
@@ -64,6 +101,8 @@ async function bootstrap() {
   fastifyInstance.get('/health', (_req: any, reply: any) => {
     reply.send({ status: 'ok', uptime: process.uptime() });
   });
+  fastifyInstance.get('/uploads/:filename', serveUploadWithFallback);
+  fastifyInstance.get('/api/uploads/:filename', serveUploadWithFallback);
 
   // Auto-rewrite routes missing the /api prefix (supports extension calls like /catalog/extension/sync)
   fastifyInstance.addHook('onRequest', (request: any, reply: any, done: any) => {
