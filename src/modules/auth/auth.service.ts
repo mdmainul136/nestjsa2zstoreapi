@@ -17,6 +17,8 @@ import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { MailService } from '../mail/mail.service';
 
 @Injectable()
@@ -393,4 +395,81 @@ export class AuthService {
     };
   }
 
+  /**
+   * ৯. প্রোফাইল আপডেট (নাম, ফোন, অবতার)
+   */
+  async updateProfile(userId: string, dto: UpdateProfileDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new NotFoundException('ইউজার পাওয়া যায়নি');
+    }
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(dto.name !== undefined && { name: dto.name.trim() }),
+        ...(dto.phone !== undefined && { phone: dto.phone.trim() }),
+        ...(dto.avatarUrl !== undefined && { avatarUrl: dto.avatarUrl.trim() }),
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        phone: true,
+        avatarUrl: true,
+        role: true,
+        isAdmin: true,
+        isVerified: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return {
+      success: true,
+      message: 'প্রোফাইল তথ্য সফলভাবে আপডেট করা হয়েছে।',
+      user: updatedUser,
+    };
+  }
+
+  /**
+   * ১০. পাসওয়ার্ড পরিবর্তন
+   */
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new NotFoundException('ইউজার পাওয়া যায়নি');
+    }
+
+    if (user.password) {
+      if (!dto.currentPassword) {
+        throw new BadRequestException('বর্তমান পাসওয়ার্ডটি প্রদান করুন।');
+      }
+      const isMatch = await bcrypt.compare(dto.currentPassword, user.password);
+      if (!isMatch) {
+        throw new BadRequestException('বর্তমান পাসওয়ার্ডটি সঠিক নয়।');
+      }
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.newPassword, 10);
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        password: hashedPassword,
+      },
+    });
+
+    return {
+      success: true,
+      message: 'পাসওয়ার্ড সফলভাবে পরিবর্তন করা হয়েছে।',
+    };
+  }
 }
