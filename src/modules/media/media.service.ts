@@ -138,8 +138,8 @@ export class MediaService {
     await fs.promises.writeFile(filePath, buffer);
 
     const fileSizeKb = Math.ceil(buffer.length / 1024);
-    const appUrl = process.env.APP_URL || 'http://localhost:5001';
-    const fileUrl = `${appUrl}/uploads/${fileName}`;
+    const appUrl = process.env.APP_URL;
+    const fileUrl = appUrl ? `${appUrl.replace(/\/+$/, '')}/uploads/${fileName}` : `/uploads/${fileName}`;
 
     return this.prisma.mediaFile.create({
       data: {

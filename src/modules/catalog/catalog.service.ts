@@ -2680,7 +2680,7 @@ export class CatalogService {
     });
     if (!product) throw new NotFoundException(`Product ID "${productId}" not found`);
 
-    const appUrl = process.env.APP_URL || 'http://localhost:5001';
+    const appUrl = process.env.APP_URL || '';
     const isExternal = (url?: string | null) => {
       if (!url || typeof url !== 'string') return false;
       const u = url.trim();
