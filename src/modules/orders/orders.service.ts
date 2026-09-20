@@ -433,4 +433,55 @@ export class OrdersService {
     return { success: true, count: results.length, results };
   }
 
+  /**
+   * ৭. অর্ডার ডিলিট (Admin Delete Order)
+   */
+  async deleteOrder(id: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      select: { id: true, orderNumber: true },
+    });
+
+    if (!order) {
+      throw new NotFoundException(`অর্ডার পাওয়া যায়নি (ID: ${id})`);
+    }
+
+    // Explicitly delete OrderItems first for extra safety
+    await this.prisma.orderItem.deleteMany({
+      where: { orderId: id },
+    });
+
+    await this.prisma.order.delete({
+      where: { id },
+    });
+
+    return {
+      success: true,
+      message: `অর্ডার #${order.orderNumber} সফলভাবে মুছে ফেলা হয়েছে।`,
+      deletedOrderId: id,
+    };
+  }
+
+  /**
+   * ৮. বাল্ক অর্ডার ডিলিট (Admin Bulk Delete Orders)
+   */
+  async bulkDeleteOrders(orderIds: string[]) {
+    if (!orderIds || !orderIds.length) {
+      return { success: false, message: 'কোনো অর্ডার আইডি সিলেক্ট করা হয়নি।' };
+    }
+
+    await this.prisma.orderItem.deleteMany({
+      where: { orderId: { in: orderIds } },
+    });
+
+    const deleteResult = await this.prisma.order.deleteMany({
+      where: { id: { in: orderIds } },
+    });
+
+    return {
+      success: true,
+      message: `${deleteResult.count} টি অর্ডার সফলভাবে মুছে ফেলা হয়েছে।`,
+      count: deleteResult.count,
+    };
+  }
 }

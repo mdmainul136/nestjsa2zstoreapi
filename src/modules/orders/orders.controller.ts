@@ -3,6 +3,7 @@ import {
   Post,
   Get,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
@@ -97,5 +98,21 @@ export class OrdersController {
     @Body() body: { orderIds: string[]; courierName: string; notes?: string },
   ) {
     return this.ordersService.bulkDispatch(body);
+  }
+
+  /**
+   * ৫. অর্ডার ডিলিট: DELETE /orders/:id
+   */
+  @Delete(':id')
+  async deleteOrder(@Param('id') id: string) {
+    return this.ordersService.deleteOrder(id);
+  }
+
+  /**
+   * ৬. একাধিক অর্ডার একসাথে ডিলিট: POST /orders/delete/bulk
+   */
+  @Post('delete/bulk')
+  async bulkDeleteOrders(@Body() body: { orderIds: string[] }) {
+    return this.ordersService.bulkDeleteOrders(body.orderIds);
   }
 }
