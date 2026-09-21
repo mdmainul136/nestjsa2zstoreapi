@@ -104,6 +104,20 @@ async function bootstrap() {
   fastifyInstance.get('/uploads/:filename', serveUploadWithFallback);
   fastifyInstance.get('/api/uploads/:filename', serveUploadWithFallback);
 
+  // Auto-parse text/plain and raw JSON strings as JSON objects (resilient fallback for clients)
+  fastifyInstance.addContentTypeParser(
+    ['text/plain', 'application/octet-stream'],
+    { parseAs: 'string' },
+    (_req: any, body: string, done: any) => {
+      try {
+        const json = JSON.parse(body);
+        done(null, json);
+      } catch {
+        done(null, body);
+      }
+    },
+  );
+
   // Auto-rewrite routes missing the /api prefix (supports extension calls like /catalog/extension/sync)
   fastifyInstance.addHook('onRequest', (request: any, reply: any, done: any) => {
     const rawUrl = request.raw.url || '';
