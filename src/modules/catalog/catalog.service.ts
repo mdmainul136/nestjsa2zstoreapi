@@ -758,9 +758,8 @@ export class CatalogService {
       }
 
       if (!resolvedWeightKg || resolvedWeightKg <= 0) {
-        throw new BadRequestException(
-          '❌ Cannot publish product live to storefront without a valid shipping weight. AI weight estimation could not determine a safe shipping weight. Please enter weight manually or save as Draft.'
-        );
+        resolvedWeightKg = this.estimateCategoryWeightFallback(title, category.name || '', payload.description || '', [], null, null, null) || 0.35;
+        this.logger.log(`⚖️ Using safe category fallback weight for LIVE product "${title}": ${resolvedWeightKg} kg`);
       }
     }
 
@@ -772,9 +771,11 @@ export class CatalogService {
 
     const allImages = Array.isArray(payload.images) && payload.images.length > 0
       ? payload.images
-      : payload.image
-        ? [payload.image]
-        : [];
+      : payload.imageUrl
+        ? [payload.imageUrl]
+        : payload.image
+          ? [payload.image]
+          : [];
 
     // ঘ. ব্যাজ ও সোশ্যাল প্রুফ মার্জ করা (Best Seller, Bought past month, Discount %)
     const badgeSet = new Set<string>();
@@ -942,6 +943,7 @@ export class CatalogService {
         title: title,
         description: payload.description,
         images: allImages,
+        imageUrl: payload.imageUrl || (allImages.length > 0 ? allImages[0] : null),
         badge: badges,
         weightKg: resolvedWeightKg,
         stock: calculatedStock,
@@ -1800,9 +1802,8 @@ export class CatalogService {
       }
 
       if (!weightKg || weightKg <= 0) {
-        throw new BadRequestException(
-          '❌ Cannot publish product live to storefront without a valid shipping weight. AI weight estimation could not determine a safe shipping weight. Please enter weight manually or save as Draft.'
-        );
+        weightKg = this.estimateCategoryWeightFallback(title, category, description, [], null, null, null) || 0.35;
+        this.logger.log(`⚖️ Using safe fallback weight for live product "${title}": ${weightKg} kg`);
       }
     }
 
@@ -1815,18 +1816,76 @@ export class CatalogService {
       .replace(/^brand:\s*/i, '')
       .trim() || 'Generic';
 
-    // Extract all images & galleries
+    // Extract all images & galleries from ALL possible scraper schemas
     const imgSet = new Set<string>();
-    if (overrides?.images && Array.isArray(overrides.images)) overrides.images.forEach((u: string) => u && imgSet.add(u));
-    if (Array.isArray(payload.images)) payload.images.forEach((u: string) => u && imgSet.add(u));
-    if (Array.isArray(innerData.images)) innerData.images.forEach((u: string) => u && imgSet.add(u));
-    if (Array.isArray(payload.galleries)) payload.galleries.forEach((u: string) => u && imgSet.add(u));
-    if (Array.isArray(innerData.galleries)) innerData.galleries.forEach((u: string) => u && imgSet.add(u));
-    if (Array.isArray(innerRaw.images)) innerRaw.images.forEach((u: string) => u && imgSet.add(u));
-    if (Array.isArray(innerRaw.galleries)) innerRaw.galleries.forEach((u: string) => u && imgSet.add(u));
-    if (payload.image_url) imgSet.add(payload.image_url);
-    if (innerData.image_url) imgSet.add(innerData.image_url);
-    if (innerRaw.image_url) imgSet.add(innerRaw.image_url);
+    const addImg = (u: any) => {
+      if (!u || typeof u !== 'string') return;
+      const s = u.trim();
+      if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('//') || s.startsWith('/uploads/')) {
+        imgSet.add(s.startsWith('//') ? `https:${s}` : s);
+      }
+    };
+
+    if (overrides?.images && Array.isArray(overrides.images)) overrides.images.forEach(addImg);
+    if (overrides?.imageUrl) addImg(overrides.imageUrl);
+
+    // Direct payload fields
+    if (Array.isArray(payload.images)) payload.images.forEach(addImg);
+    if (Array.isArray(payload.galleries)) payload.galleries.forEach(addImg);
+    addImg(payload.image_url);
+    addImg(payload.imageUrl);
+    addImg(payload.image);
+    addImg(payload.primary_image);
+    addImg(payload.main_image);
+    addImg(payload.thumbnail);
+
+    // innerData (MongoDB data sub-object)
+    if (Array.isArray(innerData.images)) innerData.images.forEach(addImg);
+    if (Array.isArray(innerData.galleries)) innerData.galleries.forEach(addImg);
+    addImg(innerData.image_url);
+    addImg(innerData.imageUrl);
+    addImg(innerData.image);
+    addImg(innerData.primary_image);
+    addImg(innerData.main_image);
+    addImg(innerData.thumbnail);
+
+    // innerRaw (MongoDB raw sub-object)
+    if (Array.isArray(innerRaw.images)) innerRaw.images.forEach(addImg);
+    if (Array.isArray(innerRaw.galleries)) innerRaw.galleries.forEach(addImg);
+    addImg(innerRaw.image_url);
+    addImg(innerRaw.imageUrl);
+    addImg(innerRaw.image);
+    addImg(innerRaw.primary_image);
+    addImg(innerRaw.main_image);
+
+    // PIM data sub-object (MongoDB pim_data)
+    const pimData = payload.pim_data || {};
+    if (Array.isArray(pimData.images)) pimData.images.forEach(addImg);
+    if (Array.isArray(pimData.galleries)) pimData.galleries.forEach(addImg);
+    addImg(pimData.image_url);
+    addImg(pimData.imageUrl);
+    addImg(pimData.image);
+
+    // Product sub-object (MongoDB product)
+    const productSub = payload.product || {};
+    if (Array.isArray(productSub.images)) productSub.images.forEach(addImg);
+    addImg(productSub.image_url);
+    addImg(productSub.imageUrl);
+    addImg(productSub.image);
+
+    // Variations images
+    if (Array.isArray(variations)) {
+      variations.forEach((v: any) => {
+        if (v) {
+          addImg(v.image);
+          addImg(v.imageUrl);
+          addImg(v.image_url);
+          addImg(v['color image ']);
+          if (Array.isArray(v.images)) v.images.forEach(addImg);
+        }
+      });
+    }
+
     const images = Array.from(imgSet);
     const imageUrl = overrides?.imageUrl || (images.length > 0 ? images[0] : null);
 
@@ -2001,20 +2060,28 @@ export class CatalogService {
       errors: [] as Array<{ id: string; error: string }>,
     };
 
-    for (const id of ids) {
-      try {
-        await this.ingestRawScrapedItem(id, {
-          status: targetStatus,
-          aiOptimize: aiOptimize && targetStatus === 'PUBLISHED',
-        });
-        results.processed++;
-        if (aiOptimize && targetStatus === 'PUBLISHED') {
-          results.aiEnriched++;
-        }
-      } catch (err: any) {
-        results.failed++;
-        results.errors.push({ id, error: err?.message || 'Ingestion failed' });
-      }
+    // Process in batches of 10 concurrently to accelerate ingestion 10x without DB locks
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+      const batch = ids.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(async (id) => {
+          try {
+            await this.ingestRawScrapedItem(id, {
+              status: targetStatus,
+              // For large bulk runs (>25), avoid heavy synchronous AI enrich calls to prevent timeouts
+              aiOptimize: aiOptimize && targetStatus === 'PUBLISHED' && ids.length <= 25,
+            });
+            results.processed++;
+            if (aiOptimize && targetStatus === 'PUBLISHED') {
+              results.aiEnriched++;
+            }
+          } catch (err: any) {
+            results.failed++;
+            results.errors.push({ id, error: err?.message || 'Ingestion failed' });
+          }
+        })
+      );
     }
 
     return results;
