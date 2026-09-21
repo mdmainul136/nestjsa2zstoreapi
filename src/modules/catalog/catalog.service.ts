@@ -1497,6 +1497,7 @@ export class CatalogService {
     source?: string;
     status?: string;
     search?: string;
+    titleFilter?: string;
   }) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 50;
@@ -1521,6 +1522,46 @@ export class CatalogService {
         { externalId: { contains: s, mode: 'insensitive' } },
         { brand: { contains: s, mode: 'insensitive' } },
       ];
+    }
+
+    if (query.titleFilter === 'missing') {
+      try {
+        const missingRows: any[] = await (this.prisma as any).$queryRawUnsafe(`
+          SELECT id FROM "RawScrapedItem"
+          WHERE status != 'archived' AND source != 'archived_variant'
+            AND (
+              title IS NULL 
+              OR title = '' 
+              OR title = "externalId"
+              OR title ~* '^[a-f0-9]{24}$'
+              OR title LIKE 'arch_%'
+              OR title LIKE 'raw_%'
+            )
+        `);
+        const missingIds = missingRows.map((r) => r.id);
+        where.id = { in: missingIds };
+      } catch (err: any) {
+        this.logger.warn(`Failed to filter missing title IDs: ${err?.message}`);
+      }
+    } else if (query.titleFilter === 'valid') {
+      try {
+        const missingRows: any[] = await (this.prisma as any).$queryRawUnsafe(`
+          SELECT id FROM "RawScrapedItem"
+          WHERE status != 'archived' AND source != 'archived_variant'
+            AND (
+              title IS NULL 
+              OR title = '' 
+              OR title = "externalId"
+              OR title ~* '^[a-f0-9]{24}$'
+              OR title LIKE 'arch_%'
+              OR title LIKE 'raw_%'
+            )
+        `);
+        const missingIds = missingRows.map((r) => r.id);
+        where.id = { notIn: missingIds };
+      } catch (err: any) {
+        this.logger.warn(`Failed to filter valid title IDs: ${err?.message}`);
+      }
     }
 
     const [items, total] = await Promise.all([
