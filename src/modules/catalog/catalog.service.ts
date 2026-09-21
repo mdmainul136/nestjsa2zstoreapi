@@ -400,7 +400,126 @@ export class CatalogService {
     return 0.30;
   }
 
+  /**
+   * detectCategorySmart — resolves 3-tier category hierarchy when scraped category is generic or empty.
+   */
+  private detectCategorySmart(
+    title: string,
+    desc?: string,
+    payload?: any
+  ): { category: string; subcategory: string; subSubcategory?: string } {
+    const specsList: any[] = [];
+    if (Array.isArray(payload?.data?.product_specs)) specsList.push(...payload.data.product_specs);
+    if (Array.isArray(payload?.product_specs)) specsList.push(...payload.product_specs);
+    if (Array.isArray(payload?.raw?.product_specs)) specsList.push(...payload.raw.product_specs);
+    const specText = specsList.map((s) => `${s?.name || ''} ${s?.value || ''}`).join(' ');
 
+    const combined = `${title || ''} ${desc || ''} ${specText}`.toLowerCase();
+
+    // 1. Vitamins, Supplements & Health Nutrition
+    if (
+      /vitamin|supplement|softgel|capsule|tablet|probiotic|enzyme|multivitamin|multi|gummy|gummies|drops|chew|chews|nutrition|omega|collagen|calcium|zinc|biotin|iron|herbal|dietary|organics|coq10|ashwagandha|flaxseed|fish oil|melatonin|echinacea|cinnamon|dhea|elderberry|peptides|creatine|bcaa|protein|electrolyte/i.test(
+        combined
+      )
+    ) {
+      let subSub = 'Dietary Supplements';
+      if (/multivitamin|multi[- ]vitamin/i.test(combined)) {
+        subSub = 'Multivitamins';
+      } else if (/protein|whey|creatine|bcaa|amino|mass gainer/i.test(combined)) {
+        subSub = 'Protein Powders & Nutrition';
+      } else if (/first aid|bandage|antiseptic/i.test(combined)) {
+        subSub = 'First Aid Kits';
+      }
+
+      return {
+        category: 'Health & Household',
+        subcategory: 'Vitamins & Wellness',
+        subSubcategory: subSub,
+      };
+    }
+
+    // 2. Beauty, Skincare, Haircare, Fragrance & Makeup
+    if (
+      /shampoo|conditioner|serum|cream|lotion|sunscreen|moisturizer|lipstick|lip\s*gloss|mascara|eyeliner|eyeshadow|foundation|concealer|perfume|cologne|skincare|cosmetic|face wash|body wash|shower gel|cleanser|facial|toner|exfoliator/i.test(
+        combined
+      )
+    ) {
+      if (/lipstick|lip\s*gloss|mascara|eyeliner|eyeshadow|foundation|concealer|powder|blush|makeup|nail polish/i.test(combined)) {
+        const subSub = /eye|mascara|eyeliner|eyeshadow/i.test(combined) ? 'Eye Makeup' : 'Face Makeup';
+        return {
+          category: 'Beauty & Personal Care',
+          subcategory: 'Makeup',
+          subSubcategory: subSub,
+        };
+      }
+      if (/shampoo|conditioner|hair\s*oil|hair\s*mask|styling|pomade/i.test(combined)) {
+        return {
+          category: 'Beauty & Personal Care',
+          subcategory: 'Hair Care',
+          subSubcategory: 'Shampoo & Conditioner',
+        };
+      }
+      if (/perfume|cologne|eau\s*de\s*parfum|fragrance/i.test(combined)) {
+        return {
+          category: 'Beauty & Personal Care',
+          subcategory: 'Fragrance & Grooming',
+          subSubcategory: 'Perfumes & Colognes',
+        };
+      }
+      let subSub = 'Moisturizers & Creams';
+      if (/face wash|cleanser|cleansing/i.test(combined)) subSub = 'Face Cleansers';
+      else if (/sunscreen|spf|sunblock/i.test(combined)) subSub = 'Sunscreen';
+      else if (/serum|peel|treatment/i.test(combined)) subSub = 'Serums & Treatments';
+
+      return {
+        category: 'Beauty & Personal Care',
+        subcategory: 'Skincare',
+        subSubcategory: subSub,
+      };
+    }
+
+    // 3. Baby & Child Care
+    if (/baby|infant|toddler|newborn|tear-free|pediatrician|diaper/i.test(combined)) {
+      return {
+        category: 'Health & Household',
+        subcategory: 'Personal Care',
+        subSubcategory: 'Oral Care & Toothbrushes',
+      };
+    }
+
+    // 4. Electronics & Gadgets
+    if (/phone|laptop|macbook|ipad|headphone|earbud|airpod|charger|cable|smartwatch|camera|smartphones/i.test(combined)) {
+      return {
+        category: 'Electronics & Gadgets',
+        subcategory: /phone|iphone|galaxy/i.test(combined) ? 'Smartphones & Mobile' : 'Audio & Headphones',
+        subSubcategory: /earbud|headphone/i.test(combined) ? 'Wireless Earbuds' : 'Accessories',
+      };
+    }
+
+    // 5. Fashion & Footwear
+    if (/shirt|pant|shoe|sneaker|dress|jacket|hoodie|t-shirt|boot|handbag|tote|sandal/i.test(combined)) {
+      return {
+        category: 'Apparel & Accessories',
+        subcategory: /shoe|sneaker|boot|sandal/i.test(combined) ? 'Shoes' : 'Clothing',
+        subSubcategory: /sneaker/i.test(combined) ? 'Sneakers' : /boot/i.test(combined) ? 'Boots' : 'General',
+      };
+    }
+
+    // 6. Home & Kitchen
+    if (/kitchen|dining|cookware|pan|pot|blender|bedding|sheet|pillow|duvet/i.test(combined)) {
+      return {
+        category: 'Home & Kitchen',
+        subcategory: /bedding|sheet|pillow|duvet/i.test(combined) ? 'Bedding' : 'Kitchen & Dining',
+        subSubcategory: /bedding|sheet|duvet/i.test(combined) ? 'Duvets & Sets' : 'Kitchen Tools & Utensils',
+      };
+    }
+
+    return {
+      category: 'General Catalogue',
+      subcategory: 'Other Products',
+      subSubcategory: '_other',
+    };
+  }
 
   private slugify(text: string): string {
     return text
@@ -547,10 +666,17 @@ export class CatalogService {
         parts = mappedCategoryName.split(/\s*>\s*/).map((p) => p.trim()).filter(Boolean);
         payload.subcategory = parts[1] || undefined;
         payload.subSubcategory = parts[2] || undefined;
-      } else {
+      } else if (!isGenericCat(mappedCategoryName)) {
         parts = [mappedCategoryName];
         if (explicitSub) payload.subcategory = explicitSub;
         if (explicitSubSub) payload.subSubcategory = explicitSubSub;
+      } else {
+        const smart = this.detectCategorySmart(title, payload.description, payload);
+        parts = [smart.category];
+        if (smart.subcategory) parts.push(smart.subcategory);
+        if (smart.subSubcategory) parts.push(smart.subSubcategory);
+        payload.subcategory = smart.subcategory;
+        payload.subSubcategory = smart.subSubcategory;
       }
     }
 
@@ -1446,6 +1572,16 @@ export class CatalogService {
           where: { id: raw.id },
           data: { category: realCat },
         }).catch(() => {});
+      } else {
+        const smart = this.detectCategorySmart(raw.title || innerData.title, innerData.description, payload);
+        if (smart && smart.category) {
+          const fullPath = [smart.category, smart.subcategory, smart.subSubcategory].filter(Boolean).join(' > ');
+          raw.category = fullPath;
+          (this.prisma as any).rawScrapedItem.update({
+            where: { id: raw.id },
+            data: { category: fullPath },
+          }).catch(() => {});
+        }
       }
     }
 
@@ -1542,6 +1678,9 @@ export class CatalogService {
       }
     }
 
+    // Description & Key Features extraction
+    const description = overrides?.description || payload.description || innerData.description || innerRaw.description || title;
+
     if (resolvedCategory && resolvedCategory.includes('>')) {
       const catParts = resolvedCategory.split(/\s*>\s*/).map((p: string) => p.trim()).filter(Boolean);
       if (catParts.length > 0) {
@@ -1555,13 +1694,18 @@ export class CatalogService {
       }
     }
 
+    // If still generic or empty, run smart category detection
+    if (!resolvedCategory || isGenericCat(resolvedCategory)) {
+      const smart = this.detectCategorySmart(title, description, payload);
+      resolvedCategory = smart.category;
+      if (!resolvedSubcategory) resolvedSubcategory = smart.subcategory;
+      if (!resolvedSubSubcategory) resolvedSubSubcategory = smart.subSubcategory;
+    }
+
     const category = resolvedCategory || 'General';
     const subcategory = resolvedSubcategory || payload.subcategory || innerData.subcategory || payload.pim_data?.subcategory || null;
     const subSubcategory = resolvedSubSubcategory || payload.sub_subcategory || payload.subSubcategory || innerData.sub_subcategory || payload.pim_data?.sub_subcategory || null;
     const status = overrides?.status || 'DRAFT';
-
-    // Description & Key Features extraction
-    const description = overrides?.description || payload.description || innerData.description || innerRaw.description || title;
     let features = overrides?.features || payload.features || innerData.features || payload.pim_data?.features || innerRaw.features || [];
     if ((!features || features.length === 0) && description && /<li[^>]*>/i.test(description)) {
       const liMatches = description.match(/<li[^>]*>([\s\S]*?)<\/li>/gi);
