@@ -527,18 +527,8 @@ export class PricingService {
     }
 
     const rates = [];
-    
-    if (hasPickup) {
-      rates.push({
-        id: 'office_pickup',
-        city_or_zone: 'A2Z Office Self-Pickup',
-        country_code: 'BD',
-        charge_amount: 0,
-        estimated_days: '0',
-      });
-    }
 
-    // Dhaka Division (usually considered as Base/Inside for simplicty, though sometimes outer Dhaka is sub-dhaka)
+    // Dhaka Division (Inside Dhaka - default delivery)
     rates.push({
       id: 'div_dhaka',
       city_or_zone: 'Dhaka',
@@ -558,6 +548,16 @@ export class PricingService {
         country_code: 'BD',
         charge_amount: maxOutside,
         estimated_days: '3-5',
+      });
+    }
+
+    if (hasPickup) {
+      rates.push({
+        id: 'office_pickup',
+        city_or_zone: 'A2Z Office Self-Pickup',
+        country_code: 'BD',
+        charge_amount: 0,
+        estimated_days: '0',
       });
     }
 
