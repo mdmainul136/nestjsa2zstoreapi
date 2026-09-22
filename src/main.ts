@@ -50,44 +50,66 @@ async function bootstrap() {
     },
   });
 
+  // ─── Allowed Upload Asset Extensions & Mime Types ───
+  const ALLOWED_UPLOAD_MIMES: Record<string, string> = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon',
+    '.pdf': 'application/pdf',
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+    '.csv': 'text/csv',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  };
+
   // ─── Direct Uploads Streamer with Auto-Sync Fallback ───
   const serveUploadWithFallback = async (req: any, reply: any) => {
-    const filename = req.params.filename;
-    if (!filename || filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
-      return reply.code(400).send({ error: 'Invalid filename' });
+    const filename = req.params?.filename;
+    // Security check: block dotfiles (.env, .git, etc.), directory traversal, or empty names
+    if (
+      !filename ||
+      filename.startsWith('.') ||
+      filename.includes('..') ||
+      filename.includes('/') ||
+      filename.includes('\\')
+    ) {
+      return reply.code(404).send({ error: 'File not found' });
+    }
+
+    const ext = path.extname(filename).toLowerCase();
+    const contentType = ALLOWED_UPLOAD_MIMES[ext];
+    // Reject any non-whitelisted extension immediately (blocks .env, .php, .sh, etc.)
+    if (!contentType) {
+      return reply.code(404).send({ error: 'File not found' });
     }
 
     const localPath = path.join(uploadsDir, filename);
     if (fs.existsSync(localPath)) {
-      const ext = path.extname(filename).toLowerCase();
-      const mimeTypes: Record<string, string> = {
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-        '.png': 'image/png',
-        '.webp': 'image/webp',
-        '.gif': 'image/gif',
-        '.svg': 'image/svg+xml',
-        '.pdf': 'application/pdf',
-      };
-      reply.header('Content-Type', mimeTypes[ext] || 'application/octet-stream');
+      reply.header('Content-Type', contentType);
       reply.header('Cache-Control', 'public, max-age=31536000, immutable');
       return reply.send(fs.createReadStream(localPath));
     }
 
-    // Auto-sync fallback from existing storefront repository if missing on this node
-    try {
-      const remoteUrl = `https://a2zoutletstore.com/uploads/${encodeURIComponent(filename)}`;
-      const remoteRes = await fetch(remoteUrl, { signal: AbortSignal.timeout(3000) });
-      if (remoteRes.ok) {
-        const buffer = Buffer.from(await remoteRes.arrayBuffer());
-        fs.writeFile(localPath, buffer, () => {});
-        const contentType = remoteRes.headers.get('content-type') || 'image/jpeg';
-        reply.header('Content-Type', contentType);
-        reply.header('Cache-Control', 'public, max-age=31536000, immutable');
-        return reply.send(buffer);
+    // Auto-sync fallback only if remote asset base is explicitly configured and not matching current host
+    const remoteBase = process.env.REMOTE_UPLOADS_URL;
+    if (remoteBase) {
+      try {
+        const remoteUrl = `${remoteBase.replace(/\/$/, '')}/${encodeURIComponent(filename)}`;
+        const remoteRes = await fetch(remoteUrl, { signal: AbortSignal.timeout(3000) });
+        if (remoteRes.ok) {
+          const buffer = Buffer.from(await remoteRes.arrayBuffer());
+          fs.writeFile(localPath, buffer, () => {});
+          reply.header('Content-Type', contentType);
+          reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+          return reply.send(buffer);
+        }
+      } catch {
+        // Silently 404 for missing remote assets to avoid log spamming
       }
-    } catch (err: any) {
-      logger.warn(`Failed to pull remote upload asset: ${filename} - ${err?.message}`);
     }
 
     return reply.code(404).send({ error: 'File not found' });
