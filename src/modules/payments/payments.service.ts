@@ -27,7 +27,7 @@ export class PaymentsService {
   }
 
   async initializePayment(payload: any) {
-    const { order_id, amount, customer_name, customer_email, customer_phone, return_url, cancel_url } = payload;
+    const { order_id, amount, customer_name, customer_email, customer_phone, phone, return_url, cancel_url } = payload;
     
     const config = await this.getUddoktaPayConfig();
 
@@ -39,13 +39,22 @@ export class PaymentsService {
     const appUrl = this.configService.get<string>('APP_URL') || 'http://localhost:5001';
 
     const resolvedAmount = (amount !== undefined && amount !== null && Number(amount) > 0) ? Number(amount) : order.totalAmount;
+    const resolvedPhone = (customer_phone || phone || order.customerPhone || '').trim();
 
     const paymentData = {
       full_name: customer_name || order.customerName,
       email: customer_email || order.customerEmail,
+      phone: resolvedPhone,
+      customer_phone: resolvedPhone,
+      mobile: resolvedPhone,
+      phone_number: resolvedPhone,
       amount: (Math.round(resolvedAmount * 100) / 100).toFixed(2),
       metadata: {
         order_id: order.id,
+        phone: resolvedPhone,
+        customer_phone: resolvedPhone,
+        phone_number: resolvedPhone,
+        customer_name: customer_name || order.customerName,
       },
       redirect_url: return_url,
       return_type: 'GET', // UddoktaPay will append invoice_id as query param to return_url
@@ -110,14 +119,22 @@ export class PaymentsService {
         const orderId = verifyData.metadata?.order_id;
         
         if (orderId) {
+          const updateData: any = {
+            paymentStatus: 'PAID',
+            paymentMethod: verifyData.payment_method || 'UDDOKTAPAY',
+            gatewayTransactionId: verifyData.transaction_id || invoice_id,
+            paymentDetails: verifyData,
+          };
+
+          // If the payer phone is returned by the gateway, ensure order phone is recorded
+          const payerPhone = verifyData.sender_number || verifyData.phone || verifyData.metadata?.phone || verifyData.metadata?.customer_phone;
+          if (payerPhone) {
+            updateData.customerPhone = payerPhone;
+          }
+
           await this.prisma.order.update({
             where: { id: orderId },
-            data: {
-              paymentStatus: 'PAID',
-              paymentMethod: verifyData.payment_method || 'UDDOKTAPAY',
-              gatewayTransactionId: verifyData.transaction_id || invoice_id,
-              paymentDetails: verifyData,
-            },
+            data: updateData,
           });
           this.logger.log(`Order ${orderId} marked as PAID via UddoktaPay IPN.`);
         }
