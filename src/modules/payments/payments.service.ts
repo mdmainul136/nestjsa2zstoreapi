@@ -31,7 +31,10 @@ export class PaymentsService {
     
     const config = await this.getUddoktaPayConfig();
 
-    const order = await this.prisma.order.findUnique({ where: { id: order_id } });
+    const order = await this.prisma.order.findUnique({
+      where: { id: order_id },
+      include: { items: true },
+    });
     if (!order) {
       throw new HttpException('Order not found', HttpStatus.NOT_FOUND);
     }
@@ -40,21 +43,59 @@ export class PaymentsService {
 
     const resolvedAmount = (amount !== undefined && amount !== null && Number(amount) > 0) ? Number(amount) : order.totalAmount;
     const resolvedPhone = (customer_phone || phone || order.customerPhone || '').trim();
+    const resolvedEmail = (customer_email || order.customerEmail || '').trim();
+    const resolvedName = (customer_name || order.customerName || 'Customer').trim();
+
+    // Format readable items summary (e.g. "1. Wet Ones Sanitizer (x1) | 2. ...")
+    const itemsSummary = (order.items || [])
+      .map(
+        (item, index) =>
+          `${index + 1}. ${item.productTitle || 'Product'} (x${item.quantity}) - ৳${item.unitPrice}`
+      )
+      .join(' | ')
+      .slice(0, 300);
+
+    // Format readable delivery address
+    let deliveryAddress = order.shippingCity || '';
+    if (order.shippingAddress) {
+      try {
+        const addr = typeof order.shippingAddress === 'string'
+          ? JSON.parse(order.shippingAddress)
+          : order.shippingAddress;
+        const parts = [addr.house, addr.street, addr.area, order.shippingCity, addr.postalCode, order.shippingCountry].filter(Boolean);
+        if (parts.length > 0) deliveryAddress = parts.join(', ');
+      } catch (_) {
+        deliveryAddress = String(order.shippingAddress);
+      }
+    }
 
     const paymentData = {
-      full_name: customer_name || order.customerName,
-      email: customer_email || order.customerEmail,
+      full_name: resolvedName,
+      email: resolvedEmail,
       phone: resolvedPhone,
       customer_phone: resolvedPhone,
       mobile: resolvedPhone,
       phone_number: resolvedPhone,
       amount: (Math.round(resolvedAmount * 100) / 100).toFixed(2),
+      currency: (order.currency || 'BDT').toUpperCase(),
+      product_name: itemsSummary || `Order #${order.orderNumber}`,
+      description: `Order #${order.orderNumber} - ${resolvedName} (${resolvedPhone})`,
       metadata: {
         order_id: order.id,
-        phone: resolvedPhone,
+        order_number: order.orderNumber,
+        customer_name: resolvedName,
         customer_phone: resolvedPhone,
-        phone_number: resolvedPhone,
-        customer_name: customer_name || order.customerName,
+        customer_email: resolvedEmail,
+        phone: resolvedPhone,
+        email: resolvedEmail,
+        order_items: itemsSummary || 'N/A',
+        items_count: order.items?.length || 0,
+        delivery_address: deliveryAddress,
+        shipping_city: order.shippingCity,
+        subtotal: order.productSubtotal,
+        delivery_fee: order.localDeliveryFee,
+        total_amount: resolvedAmount,
+        currency: (order.currency || 'BDT').toUpperCase(),
       },
       redirect_url: return_url,
       return_type: 'GET', // UddoktaPay will append invoice_id as query param to return_url
@@ -116,7 +157,7 @@ export class PaymentsService {
       const verifyData = await verifyRes.json();
       
       if (verifyData.status === 'COMPLETED') {
-        const orderId = verifyData.metadata?.order_id;
+        const orderId = verifyData.metadata?.order_id || verifyData.metadata?.orderId;
         
         if (orderId) {
           const updateData: any = {
@@ -126,10 +167,10 @@ export class PaymentsService {
             paymentDetails: verifyData,
           };
 
-          // If the payer phone is returned by the gateway, ensure order phone is recorded
+          // If a valid payer phone is returned by the gateway, record it
           const payerPhone = verifyData.sender_number || verifyData.phone || verifyData.metadata?.phone || verifyData.metadata?.customer_phone;
-          if (payerPhone) {
-            updateData.customerPhone = payerPhone;
+          if (payerPhone && payerPhone !== 'N/A' && String(payerPhone).trim() !== '') {
+            updateData.customerPhone = String(payerPhone).trim();
           }
 
           await this.prisma.order.update({
