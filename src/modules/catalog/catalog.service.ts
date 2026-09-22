@@ -1117,10 +1117,20 @@ export class CatalogService {
         const variantTitle = v.title || `${v.color || ''} ${v.size || ''}`.trim() || `Variant #${idx + 1}`;
 
         if (matchedVariant) {
+          let finalUpdateSku = matchedVariant.sku || variantSku;
+          if (variantSku && matchedVariant.sku !== variantSku) {
+            const skuOwner = await this.prisma.variant.findUnique({ where: { sku: variantSku } });
+            if (!skuOwner || skuOwner.id === matchedVariant.id) {
+              finalUpdateSku = variantSku;
+            } else {
+              finalUpdateSku = `${variantSku}-${idx + 1}-${Math.floor(100 + Math.random() * 900)}`;
+            }
+          }
+
           await this.prisma.variant.update({
             where: { id: matchedVariant.id },
             data: {
-              sku: variantSku,
+              sku: finalUpdateSku,
               asin: rawVariantAsin || matchedVariant.asin,
               ...(v.title ? { title: v.title } : (matchedVariant.title ? {} : { title: variantTitle })),
               ...(v.size ? { size: v.size } : {}),
@@ -1135,8 +1145,11 @@ export class CatalogService {
           });
         } else {
           // ইউনিক SKU ভ্যালিডেশন যাতে কনস্ট্রেইন্ট ফেইল না হয়
+          let finalSku = variantSku;
           const existingSku = await this.prisma.variant.findUnique({ where: { sku: variantSku } });
-          const finalSku = existingSku ? `${variantSku}-${Math.floor(100 + Math.random() * 900)}` : variantSku;
+          if (existingSku) {
+            finalSku = `${variantSku}-${idx + 1}-${Math.floor(100 + Math.random() * 900)}`;
+          }
           await this.prisma.variant.create({
             data: {
               productId: product.id,

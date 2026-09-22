@@ -484,6 +484,15 @@ export class StorefrontController {
   }
 
   /**
+   * ১০.৫. অর্ডার ডিটেইলস (Order Successful / Details Page)
+   * GET /storefront/orders/:id
+   */
+  @Get('orders/:id')
+  async getOrderById(@Param('id') id: string) {
+    return this.ordersService.getOrderById(id);
+  }
+
+  /**
    * ১১. Request a Quote (RFQ) Submit
    * POST /storefront/request-quote
    */
