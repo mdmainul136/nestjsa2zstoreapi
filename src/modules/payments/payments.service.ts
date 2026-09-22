@@ -1,6 +1,7 @@
 import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class PaymentsService {
@@ -9,6 +10,7 @@ export class PaymentsService {
   constructor(
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly mailService: MailService,
   ) {}
 
   private async getUddoktaPayConfig() {
@@ -173,11 +175,17 @@ export class PaymentsService {
             updateData.customerPhone = String(payerPhone).trim();
           }
 
-          await this.prisma.order.update({
+          const updatedOrder = await this.prisma.order.update({
             where: { id: orderId },
             data: updateData,
+            include: { items: true },
           });
           this.logger.log(`Order ${orderId} marked as PAID via UddoktaPay IPN.`);
+
+          // Send paid order invoice email to customer asynchronously
+          this.mailService.sendOrderInvoiceEmail(updatedOrder).catch((err) => {
+            this.logger.error(`Failed to dispatch invoice email for order ${orderId}: ${err.message}`);
+          });
         }
       } else {
         this.logger.warn(`UddoktaPay IPN Verification Failed or Not Completed: ${JSON.stringify(verifyData)}`);

@@ -300,4 +300,211 @@ export class MailService {
       },
     });
   }
+
+  /**
+   * Order Invoice & Confirmation Email
+   */
+  async sendOrderInvoiceEmail(order: any) {
+    if (!order || !order.customerEmail) return;
+
+    // Filter out dummy placeholder emails
+    if (order.customerEmail.includes('@placeholder.com')) return;
+
+    let addressStr = order.shippingCity || '';
+    if (order.shippingAddress) {
+      try {
+        const addr = typeof order.shippingAddress === 'string'
+          ? JSON.parse(order.shippingAddress)
+          : order.shippingAddress;
+        const parts = [addr.house, addr.street, addr.area, order.shippingCity, addr.postalCode, order.shippingCountry].filter(Boolean);
+        if (parts.length > 0) addressStr = parts.join(', ');
+      } catch (_) {
+        addressStr = String(order.shippingAddress);
+      }
+    }
+
+    const items = Array.isArray(order.items) ? order.items : [];
+    const itemsHtml = items.map((item: any) => {
+      const variantStr = [item.selectedColor, item.selectedSize].filter(Boolean).join(' / ');
+      return `
+        <tr style="border-bottom: 1px solid #f1f5f9;">
+          <td style="padding: 12px 8px; font-size: 13px; color: #1e293b;">
+            <div style="font-weight: 600;">${item.productTitle || 'Product'}</div>
+            ${variantStr ? `<div style="font-size: 11px; color: #64748b; margin-top: 2px;">Variant: ${variantStr}</div>` : ''}
+          </td>
+          <td style="padding: 12px 8px; font-size: 13px; color: #475569; text-align: center;">
+            ${item.quantity || 1}
+          </td>
+          <td style="padding: 12px 8px; font-size: 13px; color: #475569; text-align: right;">
+            ৳${Number(item.unitPrice || 0).toLocaleString()}
+          </td>
+          <td style="padding: 12px 8px; font-size: 13px; font-weight: 600; color: #0f172a; text-align: right;">
+            ৳${Number(item.totalPrice || ((item.unitPrice || 0) * (item.quantity || 1)) || 0).toLocaleString()}
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    const subtotal = Number(order.productSubtotal || 0).toLocaleString();
+    const deliveryFee = Number(order.localDeliveryFee || 0).toLocaleString();
+    const totalAmount = Number(order.totalAmount || 0).toLocaleString();
+    const isPaid = (order.paymentStatus || '').toUpperCase() === 'PAID';
+    const statusBadge = isPaid
+      ? `<span style="background-color: #dcfce7; color: #15803d; padding: 4px 10px; border-radius: 9999px; font-size: 11px; font-weight: 700; text-transform: uppercase;">PAID</span>`
+      : `<span style="background-color: #fef9c3; color: #854d0e; padding: 4px 10px; border-radius: 9999px; font-size: 11px; font-weight: 700; text-transform: uppercase;">PENDING / COD</span>`;
+
+    const trackUrl = `https://a2zoutletstore.com/order-successful?order_id=${order.id}`;
+
+    const defaultHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Invoice - #${order.orderNumber || order.id}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f8fafc; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" style="max-width: 600px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+          <tr>
+            <td style="padding: 24px 32px; background-color: #0f172a; color: #ffffff;">
+              <table width="100%" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td>
+                    <h1 style="margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.5px; color: #f4a100;">
+                      A2Z <span style="color: #ffffff;">OUTLET STORE</span>
+                    </h1>
+                    <p style="margin: 4px 0 0 0; font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px;">
+                      USA & Global Imports to Bangladesh
+                    </p>
+                  </td>
+                  <td style="text-align: right;">
+                    <div style="font-size: 12px; color: #cbd5e1; font-weight: 600;">INVOICE</div>
+                    <div style="font-size: 14px; font-weight: 800; color: #ffffff;">#${order.orderNumber || order.id}</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 24px 32px 16px 32px; border-bottom: 1px solid #f1f5f9;">
+              <table width="100%" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td>
+                    <div style="font-size: 15px; font-weight: 700; color: #0f172a;">Thank you for your order!</div>
+                    <div style="font-size: 12px; color: #64748b; margin-top: 4px;">
+                      Order Date: ${new Date(order.createdAt || Date.now()).toLocaleDateString('en-US', { dateStyle: 'medium' })}
+                    </div>
+                  </td>
+                  <td style="text-align: right;">
+                    ${statusBadge}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 20px 32px; background-color: #f8fafc; border-bottom: 1px solid #f1f5f9;">
+              <table width="100%" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td style="width: 50%; vertical-align: top; padding-right: 12px;">
+                    <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">Customer Details</div>
+                    <div style="font-size: 13px; font-weight: 600; color: #0f172a;">${order.customerName || 'Customer'}</div>
+                    <div style="font-size: 12px; color: #475569; margin-top: 2px;">📞 ${order.customerPhone || 'N/A'}</div>
+                    <div style="font-size: 12px; color: #475569; margin-top: 2px;">✉️ ${order.customerEmail}</div>
+                  </td>
+                  <td style="width: 50%; vertical-align: top; padding-left: 12px;">
+                    <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">Shipment Address</div>
+                    <div style="font-size: 12px; color: #1e293b; line-height: 1.4;">${addressStr}</div>
+                    <div style="font-size: 12px; color: #475569; margin-top: 4px;">Method: <strong>${order.shippingMethod || 'Standard Delivery'}</strong></div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 24px 32px 16px 32px;">
+              <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+                <thead>
+                  <tr style="border-bottom: 2px solid #e2e8f0; text-align: left;">
+                    <th style="padding: 8px; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;">Item</th>
+                    <th style="padding: 8px; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; text-align: center;">Qty</th>
+                    <th style="padding: 8px; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; text-align: right;">Unit Price</th>
+                    <th style="padding: 8px; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; text-align: right;">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${itemsHtml}
+                </tbody>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 0 32px 24px 32px;">
+              <table width="100%" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td style="width: 50%;"></td>
+                  <td style="width: 50%;">
+                    <table width="100%" cellspacing="0" cellpadding="0" style="font-size: 13px;">
+                      <tr>
+                        <td style="padding: 6px 0; color: #64748b;">Sub-Total:</td>
+                        <td style="padding: 6px 0; font-weight: 600; text-align: right; color: #1e293b;">৳${subtotal}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 6px 0; color: #64748b;">Delivery Fee:</td>
+                        <td style="padding: 6px 0; font-weight: 600; text-align: right; color: #1e293b;">৳${deliveryFee}</td>
+                      </tr>
+                      <tr style="border-top: 2px solid #e2e8f0;">
+                        <td style="padding: 10px 0; font-size: 15px; font-weight: 800; color: #0f172a;">Total Amount:</td>
+                        <td style="padding: 10px 0; font-size: 16px; font-weight: 800; text-align: right; color: #ea580c;">৳${totalAmount}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 20px 32px; background-color: #f8fafc; border-top: 1px solid #f1f5f9; text-align: center;">
+              <a href="${trackUrl}" style="background-color: #f4a100; color: #ffffff; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: 700; font-size: 13px; display: inline-block;">
+                Track Your Parcel Live
+              </a>
+              <div style="font-size: 11px; color: #94a3b8; margin-top: 10px;">
+                Tracking Code: <strong>${order.trackingNumber || 'TRK-' + (order.orderNumber || order.id)}</strong>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 20px 32px; background-color: #ffffff; text-align: center; font-size: 11px; color: #94a3b8; border-top: 1px solid #f1f5f9;">
+              If you have any questions, reply to this email or contact support at <a href="mailto:support@a2zoutletstore.com" style="color: #f4a100; text-decoration: none;">support@a2zoutletstore.com</a>.<br>
+              © ${new Date().getFullYear()} A2Z Outlet Store. Dhaka, Bangladesh.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+    `.trim();
+
+    return this.sendMail({
+      to: order.customerEmail,
+      subject: `Order Confirmation & Invoice #${order.orderNumber || order.id} - A2Z Outlet Store`,
+      html: defaultHtml,
+      templateCode: 'ORDER_INVOICE_CONFIRMATION',
+      variables: {
+        orderNumber: order.orderNumber || order.id,
+        customerName: order.customerName,
+        totalAmount,
+      },
+    });
+  }
 }

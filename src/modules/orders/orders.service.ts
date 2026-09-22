@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { MailService } from '../mail/mail.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { runBackgroundScrape } from '../catalog/scraper.util';
 
@@ -12,7 +13,10 @@ import { runBackgroundScrape } from '../catalog/scraper.util';
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mailService: MailService,
+  ) {}
 
   /**
    * ১. নতুন অর্ডার তৈরি ও সম্পূর্ণ ফিন্যান্সিয়াল ব্রেকডাউন হিসাব
@@ -209,6 +213,13 @@ export class OrdersService {
         console.error(`[BackgroundScraper] Error on order ${order.orderNumber}:`, err);
       }
     });
+
+    // For COD orders, send order confirmation & invoice email immediately
+    if (order.paymentMethod?.toLowerCase() === 'cod') {
+      this.mailService.sendOrderInvoiceEmail(order).catch((err) => {
+        this.logger.error(`Failed to send COD invoice email for order ${order.id}: ${err.message}`);
+      });
+    }
 
     return {
       success: true,
