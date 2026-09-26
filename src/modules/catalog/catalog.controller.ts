@@ -511,6 +511,17 @@ export class CatalogController {
     return this.catalogService.createBrand(body);
   }
 
+  /** PATCH /catalog/brands/:id — ব্র্যান্ড আপডেট */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERADMIN')
+  @Patch('brands/:id')
+  async updateBrand(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { name?: string; logoUrl?: string; website?: string; isFeatured?: boolean },
+  ) {
+    return this.catalogService.updateBrand(id, body);
+  }
+
   /** DELETE /catalog/brands/:id */
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')

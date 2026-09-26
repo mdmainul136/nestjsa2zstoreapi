@@ -2863,7 +2863,11 @@ export class CatalogService {
     const slug = this.slugify(data.name);
     return this.prisma.category.upsert({
       where: { slug },
-      update: { name: data.name },
+      update: { 
+        name: data.name,
+        imageUrl: data.imageUrl !== undefined ? (data.imageUrl || null) : undefined,
+        icon: data.icon !== undefined ? (data.icon || null) : undefined,
+      },
       create: { 
         name: data.name, 
         slug, 
@@ -2883,6 +2887,12 @@ export class CatalogService {
     // If empty string is passed, unset the parentId (Root Category)
     if (data.parentId === '') {
       updateData.parentId = null;
+    }
+    if (data.imageUrl === '' || data.imageUrl === null) {
+      updateData.imageUrl = null;
+    }
+    if (data.icon === '' || data.icon === null) {
+      updateData.icon = null;
     }
     
     return this.prisma.category.update({
@@ -2924,6 +2934,20 @@ export class CatalogService {
       });
     }
     return brand;
+  }
+
+  async updateBrand(id: string, data: { name?: string; logoUrl?: string; website?: string; isFeatured?: boolean }) {
+    const existing = await this.prisma.brand.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException(`Brand ID "${id}" not found`);
+    return this.prisma.brand.update({
+      where: { id },
+      data: {
+        ...(data.name !== undefined && { name: data.name }),
+        ...(data.logoUrl !== undefined && { logoUrl: data.logoUrl }),
+        ...(data.website !== undefined && { website: data.website }),
+        ...(data.isFeatured !== undefined && { isFeatured: data.isFeatured }),
+      },
+    });
   }
 
   async deleteBrand(id: string) {
