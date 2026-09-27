@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards,
   ParseUUIDPipe,
+  Res,
 } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -65,6 +66,13 @@ export class OrdersController {
       status,
       search,
     });
+  }
+
+  @Get(':id/invoice')
+  async getOrderInvoiceHtml(@Param('id') id: string, @Res() res: any) {
+    const html = await this.ordersService.generateOrderInvoiceHtml(id);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(html);
   }
 
   @Get(':id')

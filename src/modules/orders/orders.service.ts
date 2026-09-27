@@ -540,4 +540,237 @@ export class OrdersService {
       count: deleteResult.count,
     };
   }
+
+  /**
+   * ৯. গ্রাহক ও এডমিন ইনভয়েস প্রিন্ট HTML তৈরি
+   */
+  async generateOrderInvoiceHtml(id: string): Promise<string> {
+    const order = await this.getOrderById(id);
+    const settings = await this.prisma.systemSetting.findMany({
+      where: { category: 'invoice' },
+    });
+    const map: Record<string, any> = {};
+    settings.forEach((s) => {
+      try {
+        map[s.key] = JSON.parse(s.value);
+      } catch {
+        map[s.key] = s.value;
+      }
+    });
+
+    const store = await this.prisma.storeSetting.findFirst().catch(() => null);
+
+    const companyName = map['company_name'] || store?.storeName || 'A2Z Outlet Store';
+    const legalName = map['legal_name'] || 'A2Z Outlet Store Ltd.';
+    const tagline = map['tagline'] || store?.tagline || 'Authentic Cross-Border Shopping Platform';
+    const logoUrl = map['logo_url'] || store?.logoUrl || '';
+    const binNumber = map['bin_number'] || 'BIN: 004819284-0101 (Mushak 6.3)';
+    const address = map['address'] || store?.officeAddress || 'House #12, Road #4, Dhanmondi, Dhaka-1205, Bangladesh';
+    const phone = map['phone'] || store?.supportPhone || '+880 1700-000000';
+    const email = map['email'] || store?.supportEmail || 'billing@a2zoutletstore.com';
+    const website = map['website'] || 'https://a2zoutletstore.com';
+    const invoiceTitle = map['invoice_title'] || 'TAX INVOICE / CASH MEMO';
+    const invoicePrefix = map['invoice_prefix'] || 'A2Z-INV-';
+    const accentColor = map['accent_color'] || '#0f172a';
+    const showLogo = map['show_logo'] !== undefined ? (map['show_logo'] === 'true' || map['show_logo'] === true) : true;
+    const showTagline = map['show_tagline'] !== undefined ? (map['show_tagline'] === 'true' || map['show_tagline'] === true) : true;
+    const showTaxBin = map['show_tax_bin'] !== undefined ? (map['show_tax_bin'] === 'true' || map['show_tax_bin'] === true) : true;
+    const showBarcode = map['show_barcode'] !== undefined ? (map['show_barcode'] === 'true' || map['show_barcode'] === true) : true;
+    const showSku = map['show_sku'] !== undefined ? (map['show_sku'] === 'true' || map['show_sku'] === true) : true;
+    const showShippingDetails = map['show_shipping_details'] !== undefined ? (map['show_shipping_details'] === 'true' || map['show_shipping_details'] === true) : true;
+    const showPaymentStatus = map['show_payment_status'] !== undefined ? (map['show_payment_status'] === 'true' || map['show_payment_status'] === true) : true;
+    const showLogisticsFee = map['show_logistics_fee'] !== undefined ? (map['show_logistics_fee'] === 'true' || map['show_logistics_fee'] === true) : true;
+    const showGatewayFee = map['show_gateway_fee'] !== undefined ? (map['show_gateway_fee'] === 'true' || map['show_gateway_fee'] === true) : true;
+    const showSignatureBlock = map['show_signature_block'] !== undefined ? (map['show_signature_block'] === 'true' || map['show_signature_block'] === true) : true;
+    const showTerms = map['show_terms'] !== undefined ? (map['show_terms'] === 'true' || map['show_terms'] === true) : true;
+    const signatoryTitle = map['signatory_title'] || 'Authorized Signatory';
+    const signatoryName = map['signatory_name'] || 'Accounts & Billing Department';
+    const termsText = map['terms_text'] || '1. Please inspect the parcel carefully upon delivery before signing.\n2. For issues, contact customer support within 48 hours with order ID.\n3. Return & warranty applicable as per A2Z Outlet Store refund terms.';
+    const footerNote = map['footer_note'] || 'This is an authentic computer-generated tax invoice. Thank you for your business!';
+
+    const createdAt = order.createdAt ? new Date(order.createdAt) : new Date();
+    const dateFormatted = createdAt.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const timeFormatted = createdAt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    const invoiceNo = order.orderNumber.startsWith('A2Z-')
+      ? invoicePrefix + order.orderNumber.replace('A2Z-', '')
+      : invoicePrefix + order.orderNumber;
+
+    let addressStr = '';
+    if (typeof order.shippingAddress === 'object' && order.shippingAddress !== null) {
+      const parts = [
+        (order.shippingAddress as any).house,
+        (order.shippingAddress as any).street,
+        (order.shippingAddress as any).area,
+        (order.shippingAddress as any).postalCode,
+      ].filter(Boolean);
+      addressStr = parts.join(', ');
+    } else if (typeof order.shippingAddress === 'string') {
+      addressStr = order.shippingAddress;
+    }
+    if (!addressStr) addressStr = 'Doorstep Delivery Address';
+
+    const itemsRows = (order.items || []).map((it, idx) => `
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 9px 10px; color: #64748b; font-family: monospace; font-size: 11px;">${idx + 1}</td>
+        <td style="padding: 9px 10px;">
+          <div style="font-weight: 600; color: #0f172a; font-size: 12px;">${it.productTitle || 'Product Item'}</div>
+          ${showSku && it.productId ? `<div style="font-size: 10px; color: #64748b; font-family: monospace; margin-top: 2px;">SKU: ${it.productId}</div>` : ''}
+          ${it.selectedSize || it.selectedColor ? `<div style="font-size: 10px; color: #64748b; margin-top: 1px;">Variant: ${[it.selectedSize, it.selectedColor].filter(Boolean).join(' ')}</div>` : ''}
+        </td>
+        <td style="padding: 9px 10px; text-align: center; font-family: monospace; font-size: 12px;">${it.quantity}</td>
+        <td style="padding: 9px 10px; text-align: right; font-family: monospace; font-size: 12px;">৳${Number(it.unitPrice || 0).toLocaleString()}</td>
+        <td style="padding: 9px 10px; text-align: right; font-family: monospace; font-weight: 700; font-size: 12px;">৳${Number(it.totalPrice || 0).toLocaleString()}</td>
+      </tr>
+    `).join('');
+
+    const isPaid = (order.paymentStatus || '').toUpperCase() === 'PAID';
+
+    return `<!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8" />
+      <title>${invoiceNo} - ${companyName}</title>
+      <style>
+        @page { size: A4 portrait; margin: 10mm 12mm; }
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; background: #fff; color: #0f172a; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      </style>
+    </head>
+    <body>
+      <div style="max-width: 800px; margin: 0 auto; padding: 24px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 16px; border-bottom: 3px solid ${accentColor}; margin-bottom: 16px;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 12px;">
+              ${showLogo && logoUrl ? `<img src="${logoUrl}" alt="${companyName}" style="height: 48px; max-width: 190px; object-fit: contain;" />` : showLogo ? `<div style="width: 44px; height: 44px; border-radius: 8px; background: ${accentColor}; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 18px;">A2Z</div>` : ''}
+              <div>
+                <div style="font-size: 20px; font-weight: 900; color: ${accentColor};">${companyName}</div>
+                ${showTagline && tagline ? `<div style="font-size: 11px; color: #64748b;">${tagline}</div>` : ''}
+              </div>
+            </div>
+            <div style="font-size: 11px; color: #475569; margin-top: 10px; line-height: 1.5;">
+              <div>${address}</div>
+              <div>Phone: ${phone} • Email: ${email}</div>
+              ${showTaxBin && binNumber ? `<div style="font-weight: 700; color: #1e293b; margin-top: 3px;">${binNumber}</div>` : ''}
+            </div>
+          </div>
+          <div style="text-align: right;">
+            <div style="display: inline-block; padding: 4px 12px; background: ${accentColor}; color: #fff; font-size: 11px; font-weight: 800; text-transform: uppercase; border-radius: 4px; margin-bottom: 8px;">${invoiceTitle}</div>
+            <div style="font-family: monospace; font-size: 14px; font-weight: 800;">${invoiceNo}</div>
+            <div style="font-size: 11px; color: #64748b;">Date: ${dateFormatted}</div>
+            <div style="font-size: 11px; color: #64748b;">Time: ${timeFormatted}</div>
+            ${showPaymentStatus ? `
+              <div style="margin-top: 6px;">
+                <span style="font-size: 10px; font-weight: 700; font-family: monospace; padding: 2px 6px; border-radius: 4px; background: #ede9fe; color: #5b21b6;">${order.paymentMethod || 'COD'}</span>
+                <span style="font-size: 10px; font-weight: 700; font-family: monospace; padding: 2px 6px; border-radius: 4px; background: ${isPaid ? '#dcfce7' : '#fef3c7'}; color: ${isPaid ? '#15803d' : '#92400e'};">${order.paymentStatus}</span>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 12px 0; border-bottom: 1px solid #e2e8f0; margin-bottom: 16px;">
+          <div>
+            <div style="font-size: 10px; font-weight: 800; text-transform: uppercase; color: #94a3b8; margin-bottom: 4px;">Billed & Shipped To:</div>
+            <div style="font-size: 13px; font-weight: 700;">${order.customerName}</div>
+            <div style="font-size: 11px; color: #475569; font-family: monospace;">Phone: ${order.customerPhone}</div>
+            ${order.customerEmail ? `<div style="font-size: 11px; color: #475569;">Email: ${order.customerEmail}</div>` : ''}
+            ${showShippingDetails ? `<div style="font-size: 11px; color: #475569; margin-top: 3px;">${addressStr}, ${order.shippingCity || 'Dhaka'}</div>` : ''}
+          </div>
+          <div style="text-align: right;">
+            <div style="font-size: 10px; font-weight: 800; text-transform: uppercase; color: #94a3b8; margin-bottom: 4px;">Order Summary:</div>
+            <div style="font-size: 12px; font-family: monospace; font-weight: 700;">Order #${order.orderNumber}</div>
+            <div style="font-size: 11px; color: #64748b;">Method: ${order.shippingMethod || 'Standard Delivery'}</div>
+            ${order.gatewayTransactionId ? `<div style="font-size: 10px; color: #64748b; font-family: monospace;">Trx: ${order.gatewayTransactionId}</div>` : ''}
+          </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 16px;">
+          <thead>
+            <tr style="background: ${accentColor}; color: #ffffff; font-size: 10px; text-transform: uppercase;">
+              <th style="padding: 8px 10px; text-align: left;">SL</th>
+              <th style="padding: 8px 10px; text-align: left;">Item Description</th>
+              <th style="padding: 8px 10px; text-align: center;">Qty</th>
+              <th style="padding: 8px 10px; text-align: right;">Unit Price</th>
+              <th style="padding: 8px 10px; text-align: right;">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsRows}
+          </tbody>
+        </table>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: flex-start; margin-bottom: 20px;">
+          <div>
+            ${showBarcode ? `
+              <div style="display: inline-flex; align-items: center; gap: 12px; padding: 10px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;">
+                <div>
+                  <div style="font-size: 9px; font-weight: 800; color: #64748b; text-transform: uppercase;">Tracking Number</div>
+                  <div style="font-family: monospace; font-size: 12px; font-weight: 800; color: #0f172a;">${order.orderNumber}</div>
+                  <div style="font-size: 9px; color: #94a3b8;">Authentic E-Receipt</div>
+                </div>
+              </div>
+            ` : ''}
+          </div>
+          <div style="font-size: 12px; line-height: 1.8;">
+            <div style="display: flex; justify-content: space-between; color: #475569;">
+              <span>Product Subtotal:</span>
+              <span style="font-family: monospace; font-weight: 600;">৳${Number(order.productSubtotal || order.totalAmount).toLocaleString()}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; color: #475569;">
+              <span>Delivery Fee:</span>
+              <span style="font-family: monospace;">৳${Number(order.localDeliveryFee || order.shippingFee || 0).toLocaleString()}</span>
+            </div>
+            ${showLogisticsFee && ((order as any).logisticsFee || (order.paymentDetails as any)?.logisticsFee) ? `
+              <div style="display: flex; justify-content: space-between; color: #475569;">
+                <span>Logistics & Handling:</span>
+                <span style="font-family: monospace;">৳${Number((order as any).logisticsFee || (order.paymentDetails as any)?.logisticsFee).toLocaleString()}</span>
+              </div>
+            ` : ''}
+            ${showGatewayFee && order.gatewayFee && order.gatewayFee > 0 ? `
+              <div style="display: flex; justify-content: space-between; color: #475569;">
+                <span>Gateway Fee:</span>
+                <span style="font-family: monospace;">৳${Number(order.gatewayFee).toLocaleString()}</span>
+              </div>
+            ` : ''}
+            <div style="display: flex; justify-content: space-between; font-size: 15px; font-weight: 900; color: ${accentColor}; border-top: 2px solid ${accentColor}; padding-top: 6px;">
+              <span>Net Total Amount:</span>
+              <span style="font-family: monospace;">৳${Number(order.totalAmount).toLocaleString()}</span>
+            </div>
+          </div>
+        </div>
+
+        ${showTerms && termsText ? `
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; margin-bottom: 20px; font-size: 10px; color: #475569; line-height: 1.5;">
+            <div style="font-weight: 800; text-transform: uppercase; color: #334155; margin-bottom: 4px;">Terms & Return Guidelines:</div>
+            <div style="white-space: pre-line;">${termsText}</div>
+          </div>
+        ` : ''}
+
+        <div style="border-top: 1px solid #e2e8f0; padding-top: 16px;">
+          ${showSignatureBlock ? `
+            <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 16px; font-size: 11px;">
+              <div style="color: #64748b;">
+                <div>Customer Signature: _______________________</div>
+                <div style="font-size: 9px; margin-top: 3px;">Received merchandise in good condition</div>
+              </div>
+              <div style="text-align: right;">
+                <div style="display: inline-block; border-bottom: 1px solid #94a3b8; padding-bottom: 2px; font-weight: 700;">${signatoryName}</div>
+                <div style="font-size: 10px; color: #64748b; font-weight: 600; text-transform: uppercase;">${signatoryTitle}</div>
+              </div>
+            </div>
+          ` : ''}
+
+          <div style="text-align: center; font-size: 10px; color: #64748b;">
+            <div>${footerNote}</div>
+            <div style="font-size: 9px; color: #94a3b8; margin-top: 2px;">Powered by ${legalName} • ${website}</div>
+          </div>
+        </div>
+      </div>
+      <script>
+        window.onload = function() {
+          setTimeout(function() { window.print(); }, 300);
+        };
+      </script>
+    </body>
+    </html>`;
+  }
 }
