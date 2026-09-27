@@ -184,8 +184,7 @@ async function bootstrap() {
       if (
         allowedOrigins.length === 0 ||
         allowedOrigins.includes(origin) ||
-        origin.endsWith('.a2zoutletstore.com') ||
-        origin === 'https://a2zoutletstore.com' ||
+        origin.includes('a2zoutletstore.com') ||
         origin.includes('localhost') ||
         origin.includes('127.0.0.1')
       ) {
@@ -195,7 +194,17 @@ async function bootstrap() {
     },
     credentials: true,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'X-Requested-With', 'Accept'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'x-api-key',
+      'X-Requested-With',
+      'Accept',
+      'Origin',
+      'Cache-Control',
+      'Pragma',
+      'X-CSRF-Token',
+    ],
   });
 
   // Global Validation

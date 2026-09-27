@@ -475,23 +475,67 @@ export class StorefrontController {
   }
 
   /**
+   * ৯.৫. স্টোরফ্রন্ট কাস্টমার অর্ডার তালিকা
+   * GET /storefront/orders?email=customer@example.com&limit=50
+   */
+  @Get('orders')
+  async getStorefrontOrders(
+    @Query('email') email?: string,
+    @Query('limit') limit?: string,
+  ) {
+    if (!email) {
+      return { success: true, orders: [], items: [], count: 0 };
+    }
+    const orders = await this.ordersService.getOrdersByCustomer(
+      email,
+      limit ? parseInt(limit) : 50,
+    );
+    return {
+      success: true,
+      orders,
+      items: orders,
+      count: orders.length,
+    };
+  }
+
+  /**
    * ১০. লাইভ অর্ডার ট্র্যাকিং (Next.js Track Order Page)
    * GET /storefront/orders/track/:orderNumber
    */
   @Get('orders/track/:orderNumber')
   async trackOrder(@Param('orderNumber') orderNumber: string) {
     const tracking = await this.ordersService.trackOrder(orderNumber);
-    return { success: true, data: tracking };
+    return {
+      success: true,
+      ...tracking,
+      data: tracking,
+    };
   }
 
   /**
    * ১০.৫. অর্ডার ডিটেইলস (Order Successful / Details Page)
-   * GET /storefront/orders/:id
+   * GET /storefront/orders/:id?email=customer@example.com
    */
   @Get('orders/:id')
-  async getOrderById(@Param('id') id: string) {
-    return this.ordersService.getOrderById(id);
+  async getOrderById(
+    @Param('id') id: string,
+    @Query('email') email?: string,
+  ) {
+    return this.ordersService.getStorefrontOrder(id, email);
   }
+
+  /**
+   * ১০.৬. স্টোরফ্রন্ট কাস্টমারের অর্ডার বাতিল
+   * POST /storefront/orders/:id/cancel
+   */
+  @Post('orders/:id/cancel')
+  async cancelStorefrontOrder(
+    @Param('id') id: string,
+    @Body() body: { email?: string; reason?: string },
+  ) {
+    return this.ordersService.cancelOrderCustomer(id, body?.email, body?.reason);
+  }
+
 
   /**
    * ১১. Request a Quote (RFQ) Submit
@@ -549,63 +593,6 @@ export class StorefrontController {
   async saveRfqProduct(@Body() body: any) {
     return this.catalogService.saveRfqProduct(body);
   }
-
-  // ─── Storefront Customer Orders ──────────────────────────────────────────
-  /**
-   * স্টোরফ্রন্ট কাস্টমার অর্ডার তালিকা
-   * GET /api/storefront/orders?email=customer@example.com&limit=50
-   */
-  @Get('orders')
-  async getStorefrontOrders(
-    @Query('email') email?: string,
-    @Query('limit') limit?: string,
-  ) {
-    if (!email) {
-      return { success: true, orders: [], items: [], count: 0 };
-    }
-    const orders = await this.ordersService.getOrdersByCustomer(
-      email,
-      limit ? parseInt(limit) : 50,
-    );
-    return {
-      success: true,
-      orders,
-      items: orders,
-      count: orders.length,
-    };
-  }
-
-  /**
-   * ট্র্যাকিং অ্যান্ড আরএফকিউ স্ট্যাটাস
-   * GET /api/storefront/orders/track/:id
-   */
-  @Get('orders/track/:id')
-  async trackStorefrontOrderLegacy(@Param('id') id: string) {
-    return this.ordersService.trackOrder(id);
-  }
-
-  /**
-   * স্টোরফ্রন্ট অর্ডারের বিস্তারিত
-   * GET /api/storefront/orders/:id?email=customer@example.com
-   */
-  @Get('orders/:id')
-  async getStorefrontOrderById(
-    @Param('id') id: string,
-    @Query('email') email?: string,
-  ) {
-    return this.ordersService.getStorefrontOrder(id, email);
-  }
-
-  /**
-   * স্টোরফ্রন্ট কাস্টমারের অর্ডার বাতিল
-   * POST /api/storefront/orders/:id/cancel
-   */
-  @Post('orders/:id/cancel')
-  async cancelStorefrontOrder(
-    @Param('id') id: string,
-    @Body() body: { email?: string; reason?: string },
-  ) {
-    return this.ordersService.cancelOrderCustomer(id, body?.email, body?.reason);
-  }
 }
+
 
