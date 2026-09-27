@@ -225,6 +225,36 @@ export class CatalogController {
   }
 
   /**
+   * ক্যাটাগরি ক্লিনআপ স্ট্যাটস: GET /catalog/categories/cleanup-stats
+   */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERADMIN')
+  @Get('categories/cleanup-stats')
+  async getCategoryCleanupStats() {
+    return this.catalogService.getCategoryCleanupStats();
+  }
+
+  /**
+   * ফাঁকা (০-প্রোডাক্ট) ক্যাটাগরি ছাঁটাই: POST /catalog/categories/cleanup-empty
+   */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERADMIN')
+  @Post('categories/cleanup-empty')
+  async cleanupEmptyCategories() {
+    return this.catalogService.cleanupEmptyCategories();
+  }
+
+  /**
+   * ডুপ্লিকেট ক্যাটাগরি মার্জ: POST /catalog/categories/merge-duplicates
+   */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERADMIN')
+  @Post('categories/merge-duplicates')
+  async mergeDuplicateCategories() {
+    return this.catalogService.mergeDuplicateCategories();
+  }
+
+  /**
    * ৩-লেভেল ক্যাটাগরি ট্যাক্সোনমি হায়ারার্কি: GET /catalog/taxonomy
    */
   @ApiOperation({ summary: '৩-লেভেল ক্যাটাগরি ট্যাক্সোনমি হায়ারার্কি' })

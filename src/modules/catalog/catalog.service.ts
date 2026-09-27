@@ -685,7 +685,8 @@ export class CatalogService {
     let lastCat: any = null;
 
     for (let i = 0; i < Math.min(parts.length, 3); i++) {
-      const partName = parts[i];
+      const partName = parts[i]?.trim();
+      if (!partName) continue;
       let slug = this.slugify(partName) || `cat-${i}`;
 
       let cat: any = await this.prisma.category.findFirst({
@@ -694,6 +695,18 @@ export class CatalogService {
           parentId: currentParentId,
         },
       });
+
+      // ডুপ্লিকেট রোধ: একই নামের বা স্লাগের ক্যাটাগরি অলরেডি সিস্টেমে থাকলে রি-ইউজ করা
+      if (!cat) {
+        cat = await this.prisma.category.findFirst({
+          where: {
+            OR: [
+              { slug },
+              { name: { equals: partName, mode: 'insensitive' } },
+            ],
+          },
+        });
+      }
 
       if (!cat) {
         const existingSlug = await this.prisma.category.findUnique({ where: { slug } });
@@ -2520,11 +2533,23 @@ export class CatalogService {
       if (childName) parts.push(childName);
 
       for (let i = 0; i < parts.length; i++) {
-        const part = parts[i];
+        const part = parts[i]?.trim();
+        if (!part) continue;
         let slug = this.slugify(part) || 'cat';
         let cat: any = await this.prisma.category.findFirst({
           where: { name: { equals: part, mode: 'insensitive' }, parentId: currentParentId },
         });
+
+        if (!cat) {
+          cat = await this.prisma.category.findFirst({
+            where: {
+              OR: [
+                { slug },
+                { name: { equals: part, mode: 'insensitive' } },
+              ],
+            },
+          });
+        }
 
         if (!cat) {
           const existingSlug = await this.prisma.category.findUnique({ where: { slug } });
@@ -2918,6 +2943,171 @@ export class CatalogService {
     if (!existing) throw new NotFoundException(`Category ID "${id}" not found`);
     await this.prisma.category.delete({ where: { id } });
     return { success: true, message: 'ক্যাটাগরি মুছে ফেলা হয়েছে' };
+  }
+
+  /**
+   * ক্যাটাগরি ক্লিনআপ স্ট্যাটস: কতগুলো ফাঁকা (0 products & 0 children) এবং কতগুলো ডুপ্লিকেট রয়েছে
+   */
+  async getCategoryCleanupStats() {
+    // ১. যে ক্যাটাগরিগুলোতে কোনো প্রোডাক্ট এবং কোনো চাইল্ড ক্যাটাগরি নেই
+    const emptyLeafs = await this.prisma.category.findMany({
+      where: {
+        products: { none: {} },
+        children: { none: {} },
+      },
+      select: { id: true, name: true, slug: true },
+    });
+
+    // ২. সব ক্যাটাগরি এনে নামভিত্তিক ডুপ্লিকেট গ্রুপ চিহ্নিত করা
+    const allCategories = await this.prisma.category.findMany({
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        parentId: true,
+        _count: { select: { products: true, children: true } },
+      },
+    });
+
+    const groupsByName = new Map<string, typeof allCategories>();
+    for (const cat of allCategories) {
+      const normalized = cat.name.trim().toLowerCase();
+      const list = groupsByName.get(normalized) || [];
+      list.push(cat);
+      groupsByName.set(normalized, list);
+    }
+
+    let duplicateGroupsCount = 0;
+    let redundantCategoriesCount = 0;
+    const sampleDuplicates: { name: string; count: number; slugs: string[] }[] = [];
+
+    for (const [, list] of groupsByName.entries()) {
+      if (list.length > 1) {
+        duplicateGroupsCount++;
+        redundantCategoriesCount += list.length - 1;
+        if (sampleDuplicates.length < 10) {
+          sampleDuplicates.push({
+            name: list[0].name,
+            count: list.length,
+            slugs: list.map((c) => c.slug),
+          });
+        }
+      }
+    }
+
+    return {
+      totalCategories: allCategories.length,
+      emptyLeafCategoriesCount: emptyLeafs.length,
+      duplicateGroupsCount,
+      redundantCategoriesCount,
+      sampleDuplicates,
+    };
+  }
+
+  /**
+   * ০-প্রোডাক্ট ফাঁকা ক্যাটাগরি ডিলিট (Prune Empty Leaf Categories)
+   */
+  async cleanupEmptyCategories() {
+    let deletedTotal = 0;
+    // ৩ রাউন্ড পর্যন্ত লুপ চালিয়ে নেস্টেড এম্পটি প্যারেন্টগুলোকে রিমুভ করা
+    for (let round = 0; round < 3; round++) {
+      const emptyLeafs = await this.prisma.category.findMany({
+        where: {
+          products: { none: {} },
+          children: { none: {} },
+        },
+        select: { id: true },
+      });
+
+      if (emptyLeafs.length === 0) break;
+
+      const ids = emptyLeafs.map((c) => c.id);
+      const res = await this.prisma.category.deleteMany({
+        where: { id: { in: ids } },
+      });
+      deletedTotal += res.count;
+    }
+
+    return {
+      success: true,
+      deletedCount: deletedTotal,
+      message: `${deletedTotal} empty categories removed successfully`,
+    };
+  }
+
+  /**
+   * ডুপ্লিকেট ক্যাটাগরি মার্জ (Merge Duplicate Categories into Primary)
+   */
+  async mergeDuplicateCategories() {
+    const allCategories = await this.prisma.category.findMany({
+      include: {
+        _count: { select: { products: true, children: true } },
+      },
+    });
+
+    const groupsByName = new Map<string, typeof allCategories>();
+    for (const cat of allCategories) {
+      const normalized = cat.name.trim().toLowerCase();
+      const list = groupsByName.get(normalized) || [];
+      list.push(cat);
+      groupsByName.set(normalized, list);
+    }
+
+    let mergedCount = 0;
+    let productsReassigned = 0;
+
+    for (const [, list] of groupsByName.entries()) {
+      if (list.length <= 1) continue;
+
+      // ক্যানোনিকাল (টার্গেট) ক্যাটাগরি নির্বাচন:
+      // ১) সর্বোচ্চ প্রোডাক্ট সংখ্যা
+      // ২) পরিষ্কার স্লাগ (র্যান্ডম ৪ ডিজিট সাফিক্স ছাড়া)
+      // ৩) সবচেয়ে পুরাতন
+      const sorted = [...list].sort((a, b) => {
+        const prodDiff = (b._count?.products || 0) - (a._count?.products || 0);
+        if (prodDiff !== 0) return prodDiff;
+        const aHasSuffix = /-\d{4}$/.test(a.slug);
+        const bHasSuffix = /-\d{4}$/.test(b.slug);
+        if (aHasSuffix && !bHasSuffix) return 1;
+        if (!aHasSuffix && bHasSuffix) return -1;
+        return 0;
+      });
+
+      const target = sorted[0];
+      const duplicates = sorted.slice(1);
+
+      for (const dup of duplicates) {
+        if (dup.id === target.id) continue;
+
+        // ১. প্রোডাক্ট রিলিংকিং
+        const prodUpdate = await this.prisma.product.updateMany({
+          where: { categoryId: dup.id },
+          data: { categoryId: target.id },
+        });
+        productsReassigned += prodUpdate.count;
+
+        // ২. চাইল্ড ক্যাটাগরি রিলিংকিং (সার্কুলার রেফারেন্স এড়াতে target.id বাদে)
+        await this.prisma.category.updateMany({
+          where: { parentId: dup.id, NOT: { id: target.id } },
+          data: { parentId: target.id },
+        });
+
+        // ৩. ডুপ্লিকেট ক্যাটাগরি ডিলিট
+        try {
+          await this.prisma.category.delete({ where: { id: dup.id } });
+          mergedCount++;
+        } catch (err) {
+          console.error(`Failed to delete duplicate category ${dup.id}:`, err);
+        }
+      }
+    }
+
+    return {
+      success: true,
+      mergedCount,
+      productsReassigned,
+      message: `${mergedCount} duplicate categories merged, ${productsReassigned} products reassigned to primary categories.`,
+    };
   }
 
   // ─── Brand CRUD ────────────────────────────────────────────────────────────
