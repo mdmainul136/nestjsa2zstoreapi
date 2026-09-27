@@ -1,20 +1,19 @@
-﻿import {
+import {
   IsEmail,
   IsNotEmpty,
   IsOptional,
   IsString,
   MinLength,
-  Matches,
+  ValidateIf,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
-export class RegisterDto {
 
+export class RegisterDto {
   @ApiProperty({
     example: 'customer@gmail.com',
     description: 'users active email address',
   })
-
   @Transform(({ value }) => value?.toLowerCase().trim())
   @IsEmail({}, { message: 'Please enter a valid email address' })
   email: string;
@@ -26,9 +25,6 @@ export class RegisterDto {
     maximum: 32,
     required: true,
   })
-
-
-
   @IsNotEmpty({ message: 'Password is required' })
   @MinLength(6, { message: 'Password must be at least 6 characters long' })
   password: string;
@@ -36,31 +32,49 @@ export class RegisterDto {
   @ApiProperty({
     example: 'John Doe',
     description: 'Users full name',
-    required: true,
+    required: false,
   })
-  @IsNotEmpty({ message: 'Name is required' })
+  @IsOptional()
   @IsString()
-  name: string;
+  name?: string;
+
+  @ApiProperty({ example: 'John', required: false })
+  @IsOptional()
+  @IsString()
+  first_name?: string;
+
+  @ApiProperty({ example: 'Doe', required: false })
+  @IsOptional()
+  @IsString()
+  last_name?: string;
+
+  @ApiProperty({ example: 'John', required: false })
+  @IsOptional()
+  @IsString()
+  firstName?: string;
+
+  @ApiProperty({ example: 'Doe', required: false })
+  @IsOptional()
+  @IsString()
+  lastName?: string;
 
   @ApiProperty({
     example: '01712345678',
     description: 'Users phone number',
-    required: true,
+    required: false,
   })
   @IsOptional()
-  @Matches(/^01[3-9]\d{8}$/, {
-    message: 'Please enter a valid phone number',
-  })
+  @ValidateIf((o) => !!o.phone && o.phone.trim() !== '')
   @IsString()
   phone?: string;
 
   @ApiProperty({
     example: 'A2Z-123',
     description: 'Users referral code',
-
   })
   @IsOptional()
   @IsString()
   referralCode?: string;
 }
+
 

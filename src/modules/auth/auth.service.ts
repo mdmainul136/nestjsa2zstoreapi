@@ -38,8 +38,14 @@ export class AuthService {
     });
 
     if (existing) {
-      throw new ConflictException('email already exists');
+      throw new ConflictException('An account with this email already exists');
     }
+
+    const fullName = (
+      dto.name ||
+      `${dto.first_name || dto.firstName || ''} ${dto.last_name || dto.lastName || ''}`
+    ).trim() || 'Valued Customer';
+
     // referral code validity check
     let affiliateId: string | null = null;
     if (dto.referralCode) {
@@ -47,7 +53,7 @@ export class AuthService {
         where: { referralCode: dto.referralCode },
       });
       if (!affiliate) {
-        throw new BadRequestException('referral code is not valid');
+        throw new BadRequestException('Referral code is not valid');
       }
       affiliateId = affiliate.id;
     }
@@ -61,13 +67,15 @@ export class AuthService {
       data: {
         email: dto.email.toLowerCase().trim(),
         password: hashedPassword,
-        name: dto.name,
-        phone: dto.phone,
+        name: fullName,
+        phone: dto.phone || null,
         referredByCode: dto.referralCode ?? null,
         verificationToken,
-        verificationExpiresAt: new Date(Date.now() + 5 * 60 * 1000),
+        verificationExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         role: 'CUSTOMER',
         isAdmin: false,
+        isVerified: true,
+        isActive: true,
         wallet: {
           create: {
             balance: 0.0,
@@ -102,7 +110,7 @@ export class AuthService {
 
     return {
       success: true,
-      message: 'Registration successful! A 6-digit verification code has been sent to your email.',
+      message: 'Registration successful! Welcome to A2Z Outlet Store.',
       token,
       user,
       ...(process.env.NODE_ENV !== 'production' && { verificationToken }),
@@ -118,26 +126,35 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new UnauthorizedException('email or password is not valid');
+      throw new UnauthorizedException('Invalid email or password');
     }
 
     const isPasswordValid = await bcrypt.compare(dto.password, user.password);
     if (!isPasswordValid) {
-      throw new UnauthorizedException('email or password is not valid');
+      throw new UnauthorizedException('Invalid email or password');
     }
 
     if (!user.isActive) {
-      throw new UnauthorizedException('your account is currently closed');
+      throw new UnauthorizedException('Your account is currently disabled. Please contact support.');
     }
+
+    // Auto-verify customer accounts upon successful password authentication
     if (!user.isVerified) {
-      throw new UnauthorizedException('your account is not verified');
+      if (user.role === 'CUSTOMER') {
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: { isVerified: true },
+        });
+      } else {
+        throw new UnauthorizedException('Your account is not verified. Please check your email.');
+      }
     }
 
     const token = this.generateToken(user.id, user.email, user.role);
 
     return {
       success: true,
-      message: 'login successful',
+      message: 'Login successful',
       token,
       user: {
         id: user.id,
