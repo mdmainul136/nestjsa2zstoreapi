@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { ProductStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PricingService } from '../pricing/pricing.service';
@@ -3045,52 +3045,85 @@ export class CatalogService {
 
   /**
    * মাইক্রো-ক্যাটাগরি রোল-আপ (Rollup Micro-Categories into Parent)
-   * যেসব লিফ ক্যাটাগরিতে ১-৩টি প্রোডাক্ট আছে, সেগুলোকে প্যারেন্ট ক্যাটাগরিতে মুভ করে ছাঁটাই করা
+   * যেসব লিফ ক্যাটাগরিতে ১-৩টি প্রোডাক্ট আছে, সেগুলোকে প্যারেন্ট ক্যাটাগরিতে মুভ করে ছাঁটাই করা (ব্যাচ অপ্টিমাইজড)
    */
   async rollupMicroCategories(threshold: number = 3) {
     let totalMoved = 0;
     let totalPruned = 0;
 
-    for (let round = 0; round < 3; round++) {
-      const leafCategories = await this.prisma.category.findMany({
-        where: {
-          parentId: { not: null },
-          children: { none: {} },
-        },
-        include: {
-          _count: { select: { products: true } },
-        },
-      });
+    try {
+      for (let round = 0; round < 3; round++) {
+        // ১. সব ক্যাটাগরি আইডি এনে প্যারেন্ট রেফারেন্সের ভ্যালিডিটি নিশ্চিত করা
+        const allCategories = await this.prisma.category.findMany({
+          select: { id: true },
+        });
+        const validCategoryIds = new Set(allCategories.map((c) => c.id));
 
-      const targets = leafCategories.filter((c) => (c._count?.products || 0) <= threshold);
-      if (targets.length === 0) break;
+        // ২. লিফ ক্যাটাগরিগুলো বের করা যাদের চাইল্ড নেই কিন্তু ভ্যালিড প্যারেন্ট আছে
+        const leafCategories = await this.prisma.category.findMany({
+          where: {
+            parentId: { not: null },
+            children: { none: {} },
+          },
+          include: {
+            _count: { select: { products: true } },
+          },
+        });
 
-      for (const cat of targets) {
-        if (!cat.parentId) continue;
+        const targets = leafCategories.filter(
+          (c) => c.parentId && validCategoryIds.has(c.parentId) && (c._count?.products || 0) <= threshold,
+        );
 
-        if ((cat._count?.products || 0) > 0) {
-          const res = await this.prisma.product.updateMany({
-            where: { categoryId: cat.id },
-            data: { categoryId: cat.parentId },
-          });
-          totalMoved += res.count;
+        if (targets.length === 0) break;
+
+        // ৩. প্যারেন্ট আইডি অনুযায়ী গ্রুপিং করে ব্যাচে প্রোডাক্ট মুভ করা
+        const parentToChildren = new Map<string, string[]>();
+        const allTargetIds: string[] = [];
+
+        for (const cat of targets) {
+          if (!cat.parentId) continue;
+          allTargetIds.push(cat.id);
+          const list = parentToChildren.get(cat.parentId) || [];
+          list.push(cat.id);
+          parentToChildren.set(cat.parentId, list);
         }
 
+        // ব্যাচ প্রোডাক্ট আপডেট (প্রতিটি প্যারেন্টের জন্য ১টি আপডেট কুয়েরি)
+        for (const [parentId, childIds] of parentToChildren.entries()) {
+          try {
+            const res = await this.prisma.product.updateMany({
+              where: { categoryId: { in: childIds } },
+              data: { categoryId: parentId },
+            });
+            totalMoved += res.count;
+          } catch (updateErr) {
+            this.logger.error(`Failed to move products to parent ${parentId}:`, updateErr);
+          }
+        }
+
+        // ব্যাচ ক্যাটাগরি ডিলিট (১টি একক কুয়েরিতে সব টার্গেট ক্যাটাগরি ডিলিট)
         try {
-          await this.prisma.category.delete({ where: { id: cat.id } });
-          totalPruned++;
-        } catch (err) {
-          console.error(`Failed to prune micro-category ${cat.id}:`, err);
+          const delRes = await this.prisma.category.deleteMany({
+            where: { id: { in: allTargetIds } },
+          });
+          totalPruned += delRes.count;
+        } catch (delErr) {
+          this.logger.error('Failed to batch delete micro-categories:', delErr);
         }
       }
-    }
 
-    return {
-      success: true,
-      totalPruned,
-      totalMoved,
-      message: `${totalPruned} micro-categories consolidated, ${totalMoved} products rolled up to parent categories.`,
-    };
+      return {
+        success: true,
+        totalPruned,
+        totalMoved,
+        message: `${totalPruned} micro-categories consolidated, ${totalMoved} products rolled up to parent categories.`,
+      };
+    } catch (err: any) {
+      this.logger.error('rollupMicroCategories critical error:', err);
+      throw new InternalServerErrorException(
+        err.message || 'Failed to rollup micro categories',
+      );
+    }
   }
 
   /**
