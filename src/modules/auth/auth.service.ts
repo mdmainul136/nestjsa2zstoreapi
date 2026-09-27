@@ -57,6 +57,12 @@ export class AuthService {
       }
       affiliateId = affiliate.id;
     }
+    // Check if email verification is required from system settings
+    const emailVerifySetting = await this.prisma.systemSetting.findUnique({
+      where: { key: 'auth_require_email_verification' },
+    });
+    const requireEmailVerification = emailVerifySetting?.value === 'true';
+
     const verificationToken = Math.floor(100000 + Math.random() * 900000).toString();
 
     // password hash 
@@ -70,11 +76,11 @@ export class AuthService {
         name: fullName,
         phone: dto.phone || null,
         referredByCode: dto.referralCode ?? null,
-        verificationToken,
-        verificationExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        verificationToken: requireEmailVerification ? verificationToken : null,
+        verificationExpiresAt: requireEmailVerification ? new Date(Date.now() + 24 * 60 * 60 * 1000) : null,
         role: 'CUSTOMER',
         isAdmin: false,
-        isVerified: true,
+        isVerified: !requireEmailVerification,
         isActive: true,
         wallet: {
           create: {
@@ -89,6 +95,7 @@ export class AuthService {
         name: true,
         phone: true,
         role: true,
+        isVerified: true,
         createdAt: true,
       },
     });
@@ -103,14 +110,19 @@ export class AuthService {
     // jwt token generation
     const token = this.generateToken(user.id, user.email, user.role);
 
-    // Dispatch live auth verification email with 6-digit OTP
-    this.mailService
-      .sendAuthVerificationEmail(user.email, user.name || 'Valued Customer', verificationToken)
-      .catch((err) => console.warn('[AUTH MAIL] Error sending registration verification email:', err?.message));
+    // Dispatch live auth verification email with 6-digit OTP only if setting is ON
+    if (requireEmailVerification) {
+      this.mailService
+        .sendAuthVerificationEmail(user.email, user.name || 'Valued Customer', verificationToken)
+        .catch((err) => console.warn('[AUTH MAIL] Error sending registration verification email:', err?.message));
+    }
 
     return {
       success: true,
-      message: 'Registration successful! Welcome to A2Z Outlet Store.',
+      requireVerification: requireEmailVerification,
+      message: requireEmailVerification
+        ? 'Registration successful! A 6-digit verification code has been sent to your email.'
+        : 'Registration successful! Welcome to A2Z Outlet Store.',
       token,
       user,
       ...(process.env.NODE_ENV !== 'production' && { verificationToken }),
@@ -138,16 +150,19 @@ export class AuthService {
       throw new UnauthorizedException('Your account is currently disabled. Please contact support.');
     }
 
-    // Auto-verify customer accounts upon successful password authentication
-    if (!user.isVerified) {
-      if (user.role === 'CUSTOMER') {
-        await this.prisma.user.update({
-          where: { id: user.id },
-          data: { isVerified: true },
-        });
-      } else {
-        throw new UnauthorizedException('Your account is not verified. Please check your email.');
-      }
+    const emailVerifySetting = await this.prisma.systemSetting.findUnique({
+      where: { key: 'auth_require_email_verification' },
+    });
+    const requireEmailVerification = emailVerifySetting?.value === 'true';
+
+    // If verification is disabled by admin, mark unverified customer as verified
+    let isUserVerified = user.isVerified;
+    if (!requireEmailVerification && !user.isVerified) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { isVerified: true },
+      });
+      isUserVerified = true;
     }
 
     const token = this.generateToken(user.id, user.email, user.role);
@@ -164,6 +179,7 @@ export class AuthService {
         role: user.role,
         isAdmin: user.isAdmin,
         avatarUrl: user.avatarUrl,
+        isVerified: isUserVerified,
       },
     };
   }
