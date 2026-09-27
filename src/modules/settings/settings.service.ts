@@ -66,7 +66,7 @@ export class SettingsService {
         feePct: config?.nagadFeePct ?? 1.5,
       },
       sslcommerz: { isActive: config?.isSslcommerzActive ?? false },
-      stripe: { isActive: config?.isStripeActive ?? true },
+      stripe: { isActive: Boolean(config?.isStripeActive && config?.stripeSecretKey) },
       uddoktapay: { isActive: config?.isUddoktapayActive ?? false },
       cod: {
         isActive: config?.isCodActive ?? true,

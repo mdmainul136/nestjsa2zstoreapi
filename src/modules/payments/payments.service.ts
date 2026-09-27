@@ -28,10 +28,19 @@ export class PaymentsService {
     };
   }
 
+  private async getStripeConfig() {
+    const config = await this.prisma.paymentGatewaySetting.findFirst();
+    if (!config?.isStripeActive || !config?.stripeSecretKey) {
+      throw new HttpException('Stripe is not configured or disabled', HttpStatus.BAD_REQUEST);
+    }
+    return {
+      secretKey: config.stripeSecretKey.trim(),
+      publishableKey: config.stripePublishableKey?.trim() || '',
+    };
+  }
+
   async initializePayment(payload: any) {
-    const { order_id, amount, customer_name, customer_email, customer_phone, phone, return_url, cancel_url } = payload;
-    
-    const config = await this.getUddoktaPayConfig();
+    const { order_id, gateway } = payload;
 
     const order = await this.prisma.order.findUnique({
       where: { id: order_id },
@@ -41,6 +50,71 @@ export class PaymentsService {
       throw new HttpException('Order not found', HttpStatus.NOT_FOUND);
     }
 
+    const selectedGateway = (gateway || order.paymentMethod || 'uddoktapay').toLowerCase().trim();
+
+    if (selectedGateway === 'stripe') {
+      return this.initializeStripePayment(order, payload);
+    }
+
+    return this.initializeUddoktapayPayment(order, payload);
+  }
+
+  private async initializeStripePayment(order: any, payload: any) {
+    const { amount, return_url, cancel_url, customer_email } = payload;
+    const config = await this.getStripeConfig();
+
+    const resolvedAmount = (amount !== undefined && amount !== null && Number(amount) > 0)
+      ? Number(amount)
+      : order.totalAmount;
+    const resolvedEmail = (customer_email || order.customerEmail || '').trim();
+    const currency = (order.currency || 'USD').toLowerCase();
+    const unitAmount = Math.round(resolvedAmount * 100);
+
+    const bodyParams = new URLSearchParams();
+    bodyParams.append('mode', 'payment');
+    bodyParams.append('success_url', return_url);
+    bodyParams.append('cancel_url', cancel_url);
+    bodyParams.append('client_reference_id', order.id);
+    if (resolvedEmail) {
+      bodyParams.append('customer_email', resolvedEmail);
+    }
+    bodyParams.append('line_items[0][price_data][currency]', currency);
+    bodyParams.append('line_items[0][price_data][unit_amount]', String(unitAmount));
+    bodyParams.append('line_items[0][price_data][product_data][name]', `Order #${order.orderNumber}`);
+    bodyParams.append('line_items[0][quantity]', '1');
+    bodyParams.append('metadata[order_id]', order.id);
+    bodyParams.append('metadata[order_number]', String(order.orderNumber));
+
+    try {
+      const response = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${config.secretKey}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: bodyParams.toString(),
+      });
+
+      const session = await response.json();
+      if (!response.ok || !session.url) {
+        this.logger.error(`Stripe Initialize Error: ${JSON.stringify(session)}`);
+        throw new HttpException(session.error?.message || 'Failed to initialize Stripe payment', HttpStatus.BAD_REQUEST);
+      }
+
+      return {
+        redirect_url: session.url,
+        session_id: session.id,
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to initiate Stripe payment: ${error.message}`);
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(error.message || 'Stripe payment initiation failed', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  private async initializeUddoktapayPayment(order: any, payload: any) {
+    const { amount, customer_name, customer_email, customer_phone, phone, return_url, cancel_url } = payload;
+    const config = await this.getUddoktaPayConfig();
     const appUrl = this.configService.get<string>('APP_URL') || 'http://localhost:5001';
 
     const resolvedAmount = (amount !== undefined && amount !== null && Number(amount) > 0) ? Number(amount) : order.totalAmount;
@@ -48,10 +122,10 @@ export class PaymentsService {
     const resolvedEmail = (customer_email || order.customerEmail || '').trim();
     const resolvedName = (customer_name || order.customerName || 'Customer').trim();
 
-    // Format readable items summary (e.g. "1. Wet Ones Sanitizer (x1) | 2. ...")
+    // Format readable items summary
     const itemsSummary = (order.items || [])
       .map(
-        (item, index) =>
+        (item: any, index: number) =>
           `${index + 1}. ${item.productTitle || 'Product'} (x${item.quantity}) - ৳${item.unitPrice}`
       )
       .join(' | ')
@@ -100,7 +174,7 @@ export class PaymentsService {
         currency: (order.currency || 'BDT').toUpperCase(),
       },
       redirect_url: return_url,
-      return_type: 'GET', // UddoktaPay will append invoice_id as query param to return_url
+      return_type: 'GET',
       cancel_url: cancel_url,
       webhook_url: `${appUrl}/api/payments/ipn`,
     };
