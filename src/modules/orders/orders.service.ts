@@ -282,6 +282,17 @@ export class OrdersService {
         ? order.paymentDetails
         : {};
 
+    const metadata =
+      typeof order.metadata === 'object' && order.metadata !== null
+        ? (order.metadata as Record<string, any>)
+        : {};
+    const trackingHistory = Array.isArray(order.trackingHistory)
+      ? (order.trackingHistory as any[])
+      : [];
+    const isCancellationRequested =
+      Boolean(metadata.cancellationRequested) ||
+      trackingHistory.some((h: any) => h?.status === 'CANCELLATION_REQUESTED');
+
     return {
       ...order,
       id: order.id,
@@ -326,12 +337,16 @@ export class OrdersService {
       tracking_number: order.trackingNumber,
       trackingStatus: order.trackingStatus,
       tracking_status: order.trackingStatus,
-      trackingHistory: order.trackingHistory || [],
-      tracking_history: order.trackingHistory || [],
+      trackingHistory: trackingHistory,
+      tracking_history: trackingHistory,
       warehouseId: order.warehouseId,
       warehouse_id: order.warehouseId,
       warehouseName: order.warehouse?.name || 'USA Logistics Hub',
       warehouse_name: order.warehouse?.name || 'USA Logistics Hub',
+      cancellationRequested: isCancellationRequested,
+      cancellation_requested: isCancellationRequested,
+      cancellationReason: metadata.cancellationReason || '',
+      cancellation_reason: metadata.cancellationReason || '',
       createdAt: order.createdAt,
       created_at: order.createdAt,
       updatedAt: order.updatedAt,
@@ -422,7 +437,7 @@ export class OrdersService {
   }
 
   /**
-   * স্টোরফ্রন্ট কাস্টমারের অর্ডার বাতিল রিকোয়েস্ট
+   * স্টোরফ্রন্ট কাস্টমারের অর্ডার বাতিলের অনুরোধ (Cross-Border Policy: Request only, direct cancellation restricted)
    */
   async cancelOrderCustomer(orderId: string, email?: string, reason?: string) {
     const trimmed = orderId.trim();
@@ -434,6 +449,11 @@ export class OrdersService {
           { orderNumber: { equals: trimmed, mode: 'insensitive' } },
         ],
       },
+      include: {
+        items: true,
+        parcels: true,
+        warehouse: true,
+      },
     });
 
     if (!order) {
@@ -442,37 +462,78 @@ export class OrdersService {
 
     if (email && email.trim() && order.customerEmail) {
       if (order.customerEmail.trim().toLowerCase() !== email.trim().toLowerCase()) {
-        throw new BadRequestException('Unauthorized to cancel this order');
+        throw new BadRequestException('Unauthorized to request cancellation for this order');
       }
     }
 
     if (order.status === 'CANCELLED') {
-      return { success: true, message: 'অর্ডারটি ইতিমধ্যে বাতিল করা হয়েছে' };
-    }
-
-    const cancellable = ['PENDING', 'CONFIRMED'];
-    if (!cancellable.includes(order.status)) {
-      throw new BadRequestException(
-        `অর্ডার স্ট্যাটাস "${order.status}" থাকায় এখন সরাসরি বাতিল করা সম্ভব নয়। দয়া করে সাপোর্টে যোগাযোগ করুন।`,
-      );
+      return { success: true, message: 'অর্ডারটি ইতিমধ্যে বাতিল করা হয়েছে', isAlreadyCancelled: true };
     }
 
     const history = Array.isArray(order.trackingHistory)
       ? (order.trackingHistory as any[])
       : [];
+
+    // Check if a cancellation request has already been logged
+    const existingReq = history.find((h: any) => h?.status === 'CANCELLATION_REQUESTED');
+    if (existingReq) {
+      return {
+        success: true,
+        message: 'এই অর্ডারের জন্য ইতিমধ্যে বাতিলের অনুরোধ জমা রয়েছে। আমাদের টিম শীঘ্রই যোগাযোগ করবে।',
+        alreadyRequested: true,
+        order: this.formatStorefrontOrder(order),
+      };
+    }
+
+    const cancellationNote = `[Customer Cancellation Request]: ${reason || 'Customer requested order cancellation'} (${new Date().toLocaleString()})`;
     history.push({
-      status: 'CANCELLED',
-      title: 'Customer Cancelled',
-      description: reason || 'Customer requested order cancellation',
+      status: 'CANCELLATION_REQUESTED',
+      title: 'Cancellation Requested',
+      description: `Customer submitted a cancellation request: "${reason || 'No specific reason'}". International supplier & freight review in progress.`,
       timestamp: new Date().toISOString(),
     });
+
+    // Create a support ticket for admin to act upon
+    const ticketNumber = `TCK-${new Date().getFullYear()}-${Math.floor(10000 + Math.random() * 90000)}`;
+    await this.prisma.supportTicket
+      .create({
+        data: {
+          ticketNumber,
+          orderId: order.id,
+          userId: order.userId || undefined,
+          customerName: order.customerName,
+          customerEmail: order.customerEmail,
+          customerPhone: order.customerPhone,
+          subject: `Cancellation Request: Order #${order.orderNumber}`,
+          category: 'PAYMENT',
+          priority: 'HIGH',
+          status: 'OPEN',
+          messages: {
+            create: {
+              senderType: 'CUSTOMER',
+              senderName: order.customerName,
+              message: `Customer requested order cancellation for Order #${order.orderNumber}.\nReason: ${reason || 'Customer request'}\nNote: Cross-border import order review needed before approving refund/cancellation.`,
+            },
+          },
+        },
+      })
+      .catch((err) => {
+        this.logger.warn(`Could not create support ticket for cancellation: ${err.message}`);
+      });
 
     const updated = await this.prisma.order.update({
       where: { id: order.id },
       data: {
-        status: 'CANCELLED',
-        trackingStatus: 'Cancelled',
         trackingHistory: history as any,
+        notes: order.notes ? `${order.notes}\n${cancellationNote}` : cancellationNote,
+        metadata: {
+          ...(typeof order.metadata === 'object' && order.metadata !== null
+            ? (order.metadata as object)
+            : {}),
+          cancellationRequested: true,
+          cancellationReason: reason || '',
+          cancellationRequestedAt: new Date().toISOString(),
+        },
       },
       include: {
         items: true,
@@ -483,7 +544,8 @@ export class OrdersService {
 
     return {
       success: true,
-      message: 'অর্ডার সফলভাবে বাতিল করা হয়েছে',
+      message: 'অর্ডার বাতিলের অনুরোধ সফলভাবে জমা হয়েছে। যেহেতু এটি একটি আন্তর্জাতিক ক্রস-বর্ডার অর্ডার, আমাদের সোর্সিং টিম আন্তর্জাতিক সাপ্লায়ারের স্ট্যাটাস পর্যালোচনা করে দ্রুত আপনার সাথে যোগাযোগ করবে।',
+      cancellationRequested: true,
       order: this.formatStorefrontOrder(updated),
     };
   }
