@@ -824,5 +824,59 @@ export class SettingsService {
       },
     });
   }
+
+  /**
+   * ২৪. চেকআউট ফি সেটিংস (গেটওয়ে ফি ও লজিস্টিকস ফি)
+   */
+  async getCheckoutFeeSettings() {
+    const settings = await this.prisma.systemSetting.findMany({
+      where: { category: 'checkout_fees' },
+    });
+    const map: Record<string, any> = {};
+    settings.forEach((s) => {
+      try {
+        map[s.key] = JSON.parse(s.value);
+      } catch {
+        map[s.key] = s.value;
+      }
+    });
+
+    return {
+      gateway_fee_enabled: map['gateway_fee_enabled'] === 'true' || map['gateway_fee_enabled'] === true,
+      gateway_fee_bkash_pct: map['gateway_fee_bkash_pct'] !== undefined ? Number(map['gateway_fee_bkash_pct']) : 1.5,
+      gateway_fee_nagad_pct: map['gateway_fee_nagad_pct'] !== undefined ? Number(map['gateway_fee_nagad_pct']) : 1.5,
+      gateway_fee_stripe_pct: map['gateway_fee_stripe_pct'] !== undefined ? Number(map['gateway_fee_stripe_pct']) : 2.9,
+      gateway_fee_sslcommerz_pct: map['gateway_fee_sslcommerz_pct'] !== undefined ? Number(map['gateway_fee_sslcommerz_pct']) : 2.0,
+      gateway_fee_uddoktapay_pct: map['gateway_fee_uddoktapay_pct'] !== undefined ? Number(map['gateway_fee_uddoktapay_pct']) : 1.0,
+
+      logistics_fee_enabled: map['logistics_fee_enabled'] === 'true' || map['logistics_fee_enabled'] === true,
+      logistics_fee_amount: map['logistics_fee_amount'] !== undefined ? Number(map['logistics_fee_amount']) : 50.0,
+    };
+  }
+
+  async updateCheckoutFeeSettings(data: any) {
+    const entries: [string, any][] = [
+      ['gateway_fee_enabled', data.gateway_fee_enabled !== undefined ? !!data.gateway_fee_enabled : false],
+      ['gateway_fee_bkash_pct', data.gateway_fee_bkash_pct !== undefined ? Number(data.gateway_fee_bkash_pct) : 1.5],
+      ['gateway_fee_nagad_pct', data.gateway_fee_nagad_pct !== undefined ? Number(data.gateway_fee_nagad_pct) : 1.5],
+      ['gateway_fee_stripe_pct', data.gateway_fee_stripe_pct !== undefined ? Number(data.gateway_fee_stripe_pct) : 2.9],
+      ['gateway_fee_sslcommerz_pct', data.gateway_fee_sslcommerz_pct !== undefined ? Number(data.gateway_fee_sslcommerz_pct) : 2.0],
+      ['gateway_fee_uddoktapay_pct', data.gateway_fee_uddoktapay_pct !== undefined ? Number(data.gateway_fee_uddoktapay_pct) : 1.0],
+
+      ['logistics_fee_enabled', data.logistics_fee_enabled !== undefined ? !!data.logistics_fee_enabled : false],
+      ['logistics_fee_amount', data.logistics_fee_amount !== undefined ? Number(data.logistics_fee_amount) : 50.0],
+    ];
+
+    for (const [key, val] of entries) {
+      const strVal = String(val);
+      await this.prisma.systemSetting.upsert({
+        where: { key },
+        update: { value: strVal, category: 'checkout_fees' },
+        create: { key, value: strVal, category: 'checkout_fees' },
+      });
+    }
+
+    return this.getCheckoutFeeSettings();
+  }
 }
 

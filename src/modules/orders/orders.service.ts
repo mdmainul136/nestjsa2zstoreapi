@@ -88,6 +88,14 @@ export class OrdersService {
       ? dto.localDeliveryFee
       : (dto.shippingCity.toLowerCase().includes('dhaka') ? 70.0 : 130.0);
 
+    const gatewayFee = typeof dto.gatewayFee === 'number' && dto.gatewayFee > 0
+      ? dto.gatewayFee
+      : 0.0;
+
+    const logisticsFee = typeof dto.logisticsFee === 'number' && dto.logisticsFee > 0
+      ? dto.logisticsFee
+      : 0.0;
+
     // কুপন ডিসকাউন্ট হিসাব
     let discountAmount = 0.0;
     if (dto.couponCode) {
@@ -109,7 +117,7 @@ export class OrdersService {
 
     const calculatedTotal = Math.max(
       0,
-      finalSubtotal + localDeliveryFee - discountAmount,
+      finalSubtotal + localDeliveryFee + gatewayFee + logisticsFee - discountAmount,
     );
 
     const totalAmount = typeof dto.totalAmount === 'number' && dto.totalAmount > 0
@@ -136,8 +144,13 @@ export class OrdersService {
         shippingAddress: dto.shippingAddress as any,
         productSubtotal: finalSubtotal,
         localDeliveryFee,
+        gatewayFee,
         discountAmount,
         totalAmount,
+        paymentDetails: {
+          gatewayFee,
+          logisticsFee,
+        },
         currency,
         paymentMethod: dto.paymentMethod || 'cod',
         status: 'PENDING',

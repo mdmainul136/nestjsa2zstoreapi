@@ -1,4 +1,4 @@
-﻿import {
+import {
   IsArray,
   IsNotEmpty,
   IsOptional,
@@ -73,6 +73,14 @@ export class CreateOrderDto {
   @IsOptional()
   @IsNumber()
   totalAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  gatewayFee?: number;
+
+  @IsOptional()
+  @IsNumber()
+  logisticsFee?: number;
 
   @IsOptional()
   @IsString()

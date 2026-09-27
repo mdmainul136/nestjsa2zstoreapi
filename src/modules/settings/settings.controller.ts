@@ -57,6 +57,22 @@ export class SettingsController {
   }
 
   /**
+   * ৪.৫. চেকআউট ফি সেটিংস (গেটওয়ে ফি ও লজিস্টিকস ফি)
+   * GET & PUT /settings/checkout-fees
+   */
+  @Get('checkout-fees')
+  async getCheckoutFeeSettings() {
+    return this.settingsService.getCheckoutFeeSettings();
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERADMIN')
+  @Put('checkout-fees')
+  async updateCheckoutFeeSettings(@Body() data: any) {
+    return this.settingsService.updateCheckoutFeeSettings(data);
+  }
+
+  /**
    * ৫. স্টোরফ্রন্ট সম্পূর্ণ সিএমএস কন্টেন্ট (Public for Next.js SSR)
    * GET /settings/cms
    */

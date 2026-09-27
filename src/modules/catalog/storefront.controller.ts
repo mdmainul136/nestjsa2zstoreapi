@@ -84,6 +84,7 @@ export class StorefrontController {
   async getStoreConfig() {
     const config: any = await this.settingsService.getStoreSettings();
     const paymentMethods = await this.settingsService.getPublicPaymentMethods();
+    const checkoutFees = await this.settingsService.getCheckoutFeeSettings();
     
     // Add gateway enabled flags for frontend usage
     const paymentConfig = {
@@ -95,7 +96,7 @@ export class StorefrontController {
       uddoktapay_enabled: paymentMethods.uddoktapay?.isActive ? 'true' : 'false',
     };
 
-    const finalConfig = { ...config, ...paymentConfig };
+    const finalConfig = { ...config, ...paymentConfig, ...checkoutFees };
     return { success: true, data: finalConfig, ...finalConfig };
   }
 
