@@ -255,6 +255,17 @@ export class CatalogController {
   }
 
   /**
+   * মাইক্রো-ক্যাটাগরি প্যারেন্টে রোল-আপ: POST /catalog/categories/rollup-micro
+   */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERADMIN')
+  @Post('categories/rollup-micro')
+  async rollupMicroCategories(@Body() body?: { threshold?: number }) {
+    const threshold = typeof body?.threshold === 'number' ? body.threshold : 3;
+    return this.catalogService.rollupMicroCategories(threshold);
+  }
+
+  /**
    * ৩-লেভেল ক্যাটাগরি ট্যাক্সোনমি হায়ারার্কি: GET /catalog/taxonomy
    */
   @ApiOperation({ summary: '৩-লেভেল ক্যাটাগরি ট্যাক্সোনমি হায়ারার্কি' })

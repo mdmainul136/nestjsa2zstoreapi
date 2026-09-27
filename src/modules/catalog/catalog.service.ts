@@ -2958,7 +2958,7 @@ export class CatalogService {
       select: { id: true, name: true, slug: true },
     });
 
-    // ২. সব ক্যাটাগরি এনে নামভিত্তিক ডুপ্লিকেট গ্রুপ চিহ্নিত করা
+    // ২. সব ক্যাটাগরি এনে নামভিত্তিক ডুপ্লিকেট গ্রুপ এবং মাইক্রো-ক্যাটাগরি চিহ্নিত করা
     const allCategories = await this.prisma.category.findMany({
       select: {
         id: true,
@@ -2970,11 +2970,18 @@ export class CatalogService {
     });
 
     const groupsByName = new Map<string, typeof allCategories>();
+    let microCategoriesCount = 0;
+
     for (const cat of allCategories) {
       const normalized = cat.name.trim().toLowerCase();
       const list = groupsByName.get(normalized) || [];
       list.push(cat);
       groupsByName.set(normalized, list);
+
+      // ৩ বা তার কম প্রোডাক্ট বিশিষ্ট সাব/চাইল্ড ক্যাটাগরি
+      if (cat.parentId && (cat._count?.children || 0) === 0 && (cat._count?.products || 0) > 0 && (cat._count?.products || 0) <= 3) {
+        microCategoriesCount++;
+      }
     }
 
     let duplicateGroupsCount = 0;
@@ -3000,17 +3007,18 @@ export class CatalogService {
       emptyLeafCategoriesCount: emptyLeafs.length,
       duplicateGroupsCount,
       redundantCategoriesCount,
+      microCategoriesCount,
       sampleDuplicates,
     };
   }
 
   /**
-   * ০-প্রোডাক্ট ফাঁকা ক্যাটাগরি ডিলিট (Prune Empty Leaf Categories)
+   * ০-প্রোডাক্ট ফাঁকা ক্যাটাগরি ডিলিট (Prune Empty Leaf & Root Categories)
    */
   async cleanupEmptyCategories() {
     let deletedTotal = 0;
-    // ৩ রাউন্ড পর্যন্ত লুপ চালিয়ে নেস্টেড এম্পটি প্যারেন্টগুলোকে রিমুভ করা
-    for (let round = 0; round < 3; round++) {
+    // ৫ রাউন্ড পর্যন্ত লুপ চালিয়ে নেস্টেড এম্পটি প্যারেন্ট ও রুটগুলো পরিষ্কার করা
+    for (let round = 0; round < 5; round++) {
       const emptyLeafs = await this.prisma.category.findMany({
         where: {
           products: { none: {} },
@@ -3032,6 +3040,56 @@ export class CatalogService {
       success: true,
       deletedCount: deletedTotal,
       message: `${deletedTotal} empty categories removed successfully`,
+    };
+  }
+
+  /**
+   * মাইক্রো-ক্যাটাগরি রোল-আপ (Rollup Micro-Categories into Parent)
+   * যেসব লিফ ক্যাটাগরিতে ১-৩টি প্রোডাক্ট আছে, সেগুলোকে প্যারেন্ট ক্যাটাগরিতে মুভ করে ছাঁটাই করা
+   */
+  async rollupMicroCategories(threshold: number = 3) {
+    let totalMoved = 0;
+    let totalPruned = 0;
+
+    for (let round = 0; round < 3; round++) {
+      const leafCategories = await this.prisma.category.findMany({
+        where: {
+          parentId: { not: null },
+          children: { none: {} },
+        },
+        include: {
+          _count: { select: { products: true } },
+        },
+      });
+
+      const targets = leafCategories.filter((c) => (c._count?.products || 0) <= threshold);
+      if (targets.length === 0) break;
+
+      for (const cat of targets) {
+        if (!cat.parentId) continue;
+
+        if ((cat._count?.products || 0) > 0) {
+          const res = await this.prisma.product.updateMany({
+            where: { categoryId: cat.id },
+            data: { categoryId: cat.parentId },
+          });
+          totalMoved += res.count;
+        }
+
+        try {
+          await this.prisma.category.delete({ where: { id: cat.id } });
+          totalPruned++;
+        } catch (err) {
+          console.error(`Failed to prune micro-category ${cat.id}:`, err);
+        }
+      }
+    }
+
+    return {
+      success: true,
+      totalPruned,
+      totalMoved,
+      message: `${totalPruned} micro-categories consolidated, ${totalMoved} products rolled up to parent categories.`,
     };
   }
 
