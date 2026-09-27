@@ -246,40 +246,380 @@ export class OrdersService {
   }
 
   /**
-   * ২. লাইভ অর্ডার ট্র্যাকিং (Public Tracking by Order Number)
+   * Helper: Formats an order with both camelCase and snake_case properties for storefront compatibility
    */
-  async trackOrder(orderNumber: string) {
-    const order = await this.prisma.order.findUnique({
-      where: { orderNumber },
-      select: {
-        orderNumber: true,
-        status: true,
-        paymentStatus: true,
-        trackingNumber: true,
-        trackingStatus: true,
-        trackingHistory: true,
-        courierName: true,
-        courierTrackingCode: true,
-        shippingCity: true,
-        createdAt: true,
-        items: {
-          select: {
-            productTitle: true,
-            productImage: true,
-            selectedSize: true,
-            selectedColor: true,
-            quantity: true,
-            totalPrice: true,
-          },
+  formatStorefrontOrder(order: any) {
+    if (!order) return null;
+    const items = (order.items || []).map((it: any) => ({
+      id: it.id,
+      orderId: it.orderId,
+      order_id: it.orderId,
+      productId: it.productId,
+      product_id: it.productId,
+      productSlug: it.productSlug || it.productId || '',
+      product_slug: it.productSlug || it.productId || '',
+      productTitle: it.productTitle || 'Product',
+      product_title: it.productTitle || 'Product',
+      title: it.productTitle || 'Product',
+      productImage: it.productImage || '',
+      product_image: it.productImage || '',
+      image: it.productImage || '',
+      selectedColor: it.selectedColor || null,
+      selected_color: it.selectedColor || null,
+      selectedSize: it.selectedSize || null,
+      selected_size: it.selectedSize || null,
+      quantity: it.quantity || 1,
+      unitPrice: it.unitPrice || 0,
+      unit_price: it.unitPrice || 0,
+      price: it.unitPrice || 0,
+      totalPrice: it.totalPrice || ((it.unitPrice || 0) * (it.quantity || 1)),
+      total_price: it.totalPrice || ((it.unitPrice || 0) * (it.quantity || 1)),
+      weightKg: it.weightKg || 0.1,
+    }));
+
+    const paymentDetails =
+      typeof order.paymentDetails === 'object' && order.paymentDetails !== null
+        ? order.paymentDetails
+        : {};
+
+    return {
+      ...order,
+      id: order.id,
+      order_id: order.id,
+      orderNumber: order.orderNumber,
+      order_number: order.orderNumber,
+      customerName: order.customerName,
+      customer_name: order.customerName,
+      customerEmail: order.customerEmail,
+      customer_email: order.customerEmail,
+      customerPhone: order.customerPhone,
+      customer_phone: order.customerPhone,
+      shippingCity: order.shippingCity,
+      shipping_city: order.shippingCity,
+      shippingCountry: order.shippingCountry,
+      shipping_country: order.shippingCountry,
+      shippingAddress: order.shippingAddress,
+      shipping_address: order.shippingAddress,
+      shippingMethod: order.shippingMethod || 'Standard Delivery',
+      shipping_method: order.shippingMethod || 'Standard Delivery',
+      productSubtotal: order.productSubtotal || 0,
+      subtotal: order.productSubtotal || 0,
+      localDeliveryFee: order.localDeliveryFee || 0,
+      shippingFee: order.localDeliveryFee || 0,
+      shipping_fee: order.localDeliveryFee || 0,
+      gatewayFee: order.gatewayFee || 0,
+      gateway_fee: order.gatewayFee || 0,
+      logisticsFee: paymentDetails.logisticsFee || 0,
+      logistics_fee: paymentDetails.logisticsFee || 0,
+      discountAmount: order.discountAmount || 0,
+      discount_amount: order.discountAmount || 0,
+      totalAmount: order.totalAmount || 0,
+      total_amount: order.totalAmount || 0,
+      total: order.totalAmount || 0,
+      currency: order.currency || 'BDT',
+      status: order.status,
+      paymentStatus: order.paymentStatus,
+      payment_status: order.paymentStatus,
+      paymentMethod: order.paymentMethod,
+      payment_method: order.paymentMethod,
+      trackingNumber: order.trackingNumber,
+      tracking_number: order.trackingNumber,
+      trackingStatus: order.trackingStatus,
+      tracking_status: order.trackingStatus,
+      trackingHistory: order.trackingHistory || [],
+      tracking_history: order.trackingHistory || [],
+      warehouseId: order.warehouseId,
+      warehouse_id: order.warehouseId,
+      warehouseName: order.warehouse?.name || 'USA Logistics Hub',
+      warehouse_name: order.warehouse?.name || 'USA Logistics Hub',
+      createdAt: order.createdAt,
+      created_at: order.createdAt,
+      updatedAt: order.updatedAt,
+      updated_at: order.updatedAt,
+      items,
+      parcels: order.parcels || [],
+    };
+  }
+
+  /**
+   * কাস্টমার ইমেইল অনুযায়ী অর্ডারের তালিকা (Storefront Customer Order History)
+   */
+  async getOrdersByCustomer(email: string, limit: number = 50) {
+    if (!email) return [];
+    const trimmedEmail = email.trim();
+    const orders = await this.prisma.order.findMany({
+      where: {
+        OR: [
+          { customerEmail: { equals: trimmedEmail, mode: 'insensitive' } },
+          { user: { email: { equals: trimmedEmail, mode: 'insensitive' } } },
+        ],
+      },
+      take: Math.min(100, Math.max(1, limit)),
+      orderBy: { createdAt: 'desc' },
+      include: {
+        items: true,
+        parcels: true,
+        warehouse: true,
+      },
+    });
+    return orders.map((o) => this.formatStorefrontOrder(o));
+  }
+
+  /**
+   * স্টোরফ্রন্ট থেকে একটি অর্ডারের সম্পূর্ণ বিবরণ
+   */
+  async getStorefrontOrder(idOrNumber: string, email?: string) {
+    const trimmed = idOrNumber.trim();
+    const where: any = {
+      OR: [
+        { id: trimmed },
+        { orderNumber: trimmed },
+        { orderNumber: { equals: trimmed, mode: 'insensitive' } },
+        { trackingNumber: trimmed },
+        { trackingNumber: { equals: trimmed, mode: 'insensitive' } },
+      ],
+    };
+
+    if (email && email.trim()) {
+      where.OR = where.OR.map((cond: any) => ({
+        ...cond,
+        customerEmail: { equals: email.trim(), mode: 'insensitive' },
+      }));
+    }
+
+    let order = await this.prisma.order.findFirst({
+      where,
+      include: {
+        items: true,
+        parcels: true,
+        warehouse: true,
+      },
+    });
+
+    if (!order && email) {
+      order = await this.prisma.order.findFirst({
+        where: {
+          OR: [
+            { id: trimmed },
+            { orderNumber: trimmed },
+            { orderNumber: { equals: trimmed, mode: 'insensitive' } },
+            { trackingNumber: trimmed },
+          ],
         },
+        include: {
+          items: true,
+          parcels: true,
+          warehouse: true,
+        },
+      });
+    }
+
+    if (!order) {
+      throw new NotFoundException(`অর্ডার পাওয়া যায়নি: ${idOrNumber}`);
+    }
+
+    return this.formatStorefrontOrder(order);
+  }
+
+  /**
+   * স্টোরফ্রন্ট কাস্টমারের অর্ডার বাতিল রিকোয়েস্ট
+   */
+  async cancelOrderCustomer(orderId: string, email?: string, reason?: string) {
+    const trimmed = orderId.trim();
+    const order = await this.prisma.order.findFirst({
+      where: {
+        OR: [
+          { id: trimmed },
+          { orderNumber: trimmed },
+          { orderNumber: { equals: trimmed, mode: 'insensitive' } },
+        ],
       },
     });
 
     if (!order) {
-      throw new NotFoundException(`অর্ডার নম্বর পাওয়া যায়নি: ${orderNumber}`);
+      throw new NotFoundException('অর্ডার পাওয়া যায়নি');
     }
 
-    return order;
+    if (email && email.trim() && order.customerEmail) {
+      if (order.customerEmail.trim().toLowerCase() !== email.trim().toLowerCase()) {
+        throw new BadRequestException('Unauthorized to cancel this order');
+      }
+    }
+
+    if (order.status === 'CANCELLED') {
+      return { success: true, message: 'অর্ডারটি ইতিমধ্যে বাতিল করা হয়েছে' };
+    }
+
+    const cancellable = ['PENDING', 'CONFIRMED'];
+    if (!cancellable.includes(order.status)) {
+      throw new BadRequestException(
+        `অর্ডার স্ট্যাটাস "${order.status}" থাকায় এখন সরাসরি বাতিল করা সম্ভব নয়। দয়া করে সাপোর্টে যোগাযোগ করুন।`,
+      );
+    }
+
+    const history = Array.isArray(order.trackingHistory)
+      ? (order.trackingHistory as any[])
+      : [];
+    history.push({
+      status: 'CANCELLED',
+      title: 'Customer Cancelled',
+      description: reason || 'Customer requested order cancellation',
+      timestamp: new Date().toISOString(),
+    });
+
+    const updated = await this.prisma.order.update({
+      where: { id: order.id },
+      data: {
+        status: 'CANCELLED',
+        trackingStatus: 'Cancelled',
+        trackingHistory: history as any,
+      },
+      include: {
+        items: true,
+        parcels: true,
+        warehouse: true,
+      },
+    });
+
+    return {
+      success: true,
+      message: 'অর্ডার সফলভাবে বাতিল করা হয়েছে',
+      order: this.formatStorefrontOrder(updated),
+    };
+  }
+
+  /**
+   * ২. লাইভ অর্ডার ট্র্যাকিং (Public Tracking by Order Number, Tracking ID, or RFQ)
+   */
+  async trackOrder(identifier: string) {
+    if (!identifier) {
+      throw new BadRequestException('অনুসন্ধানের জন্য অর্ডার নম্বর বা ট্র্যাকিং আইডি প্রদান করুন');
+    }
+    const trimmed = identifier.trim();
+    const order = await this.prisma.order.findFirst({
+      where: {
+        OR: [
+          { orderNumber: trimmed },
+          { orderNumber: { equals: trimmed, mode: 'insensitive' } },
+          { trackingNumber: trimmed },
+          { trackingNumber: { equals: trimmed, mode: 'insensitive' } },
+          { id: trimmed },
+          { courierTrackingCode: trimmed },
+          { supplierTrackingNumber: trimmed },
+        ],
+      },
+      include: {
+        warehouse: true,
+        items: true,
+      },
+    });
+
+    if (order) {
+      const history = Array.isArray(order.trackingHistory)
+        ? (order.trackingHistory as any[])
+        : [];
+      return {
+        id: order.id,
+        orderId: order.orderNumber || order.id,
+        order_id: order.orderNumber || order.id,
+        orderNumber: order.orderNumber,
+        order_number: order.orderNumber,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        payment_status: order.paymentStatus,
+        trackingNumber: order.trackingNumber,
+        tracking_number: order.trackingNumber,
+        trackingStatus: order.trackingStatus || order.status,
+        tracking_status: order.trackingStatus || order.status,
+        trackingHistory: history,
+        tracking_history: history,
+        warehouse_id: order.warehouseId,
+        warehouse_name: order.warehouse?.name || 'USA Logistics Hub',
+        shipping_method: order.shippingMethod || 'Standard Air Freight',
+        shippingMethod: order.shippingMethod || 'Standard Air Freight',
+        courierName: order.courierName,
+        courier_name: order.courierName,
+        courierTrackingCode: order.courierTrackingCode,
+        courier_tracking_code: order.courierTrackingCode,
+        shippingCity: order.shippingCity,
+        shipping_city: order.shippingCity,
+        consolidation: order.consolidation,
+        repacking: order.repacking,
+        quality_check: order.qualityCheck,
+        photo_check: order.photoCheck,
+        customs_estimate: order.customsEstimate || 0,
+        totalAmount: order.totalAmount,
+        total_amount: order.totalAmount,
+        currency: order.currency,
+        createdAt: order.createdAt,
+        created_at: order.createdAt,
+        updatedAt: order.updatedAt,
+        updated_at: order.updatedAt,
+        items: (order.items || []).map((it) => ({
+          productTitle: it.productTitle,
+          product_title: it.productTitle,
+          productImage: it.productImage,
+          product_image: it.productImage,
+          selectedSize: it.selectedSize,
+          selected_size: it.selectedSize,
+          selectedColor: it.selectedColor,
+          selected_color: it.selectedColor,
+          quantity: it.quantity,
+          unitPrice: it.unitPrice,
+          unit_price: it.unitPrice,
+          totalPrice: it.totalPrice,
+          total_price: it.totalPrice,
+        })),
+      };
+    }
+
+    // Fallback: check QuotationRequest (RFQ)
+    const quote = await this.prisma.quotationRequest.findFirst({
+      where: {
+        OR: [
+          { id: trimmed },
+          { id: { equals: trimmed, mode: 'insensitive' } },
+        ],
+      },
+    });
+
+    if (quote) {
+      return {
+        id: quote.id,
+        order_id: quote.id,
+        orderId: quote.id,
+        is_rfq: true,
+        status: quote.status,
+        tracking_status: quote.status,
+        tracking_history: quote.adminNotes
+          ? [
+              {
+                status: quote.status,
+                description: quote.adminNotes,
+                timestamp: quote.updatedAt.toISOString(),
+              },
+            ]
+          : [],
+        quoted_price: quote.quotedPrice,
+        currency: quote.currency || 'USD',
+        product_name: quote.productName,
+        quantity: quote.quantity,
+        admin_notes: quote.adminNotes,
+        updated_at: quote.updatedAt.toISOString(),
+        created_at: quote.createdAt.toISOString(),
+        items: [
+          {
+            productTitle: quote.productName,
+            product_title: quote.productName,
+            quantity: quote.quantity,
+            totalPrice: quote.quotedPrice || 0,
+            total_price: quote.quotedPrice || 0,
+          },
+        ],
+      };
+    }
+
+    throw new NotFoundException(`অর্ডার বা ট্র্যাকিং নম্বর পাওয়া যায়নি: ${identifier}`);
   }
 
   /**

@@ -53,13 +53,26 @@ export class OrdersController {
    * ৪. এডমিন — সব অর্ডার তালিকা (paginated):
    * GET /orders?status=PENDING&search=A2Z&page=1&limit=20
    */
-    @Get()
+  @Get()
   async getAllOrders(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('status') status?: string,
     @Query('search') search?: string,
+    @Query('email') email?: string,
   ) {
+    if (email) {
+      const orders = await this.ordersService.getOrdersByCustomer(
+        email,
+        limit ? parseInt(limit) : 50,
+      );
+      return {
+        success: true,
+        orders,
+        items: orders,
+        count: orders.length,
+      };
+    }
     return this.ordersService.getAllOrders({
       page: page ? parseInt(page) : 1,
       limit: limit ? parseInt(limit) : 50,
@@ -67,6 +80,15 @@ export class OrdersController {
       search,
     });
   }
+
+  @Post(':id/cancel')
+  async cancelOrder(
+    @Param('id') id: string,
+    @Body() body: { email?: string; reason?: string },
+  ) {
+    return this.ordersService.cancelOrderCustomer(id, body?.email, body?.reason);
+  }
+
 
   @Get(':id/invoice')
   async getOrderInvoiceHtml(@Param('id') id: string, @Res() res: any) {
