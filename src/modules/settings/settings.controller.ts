@@ -257,8 +257,13 @@ export class SettingsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
   @Post('notifications/test-email')
-  async sendTestEmail(@Body('email') email: string) {
-    return this.settingsService.sendTestEmail(email);
+  async sendTestEmail(
+    @Body('email') email?: string,
+    @Body('recipientEmail') recipientEmail?: string,
+    @Body() body?: any,
+  ) {
+    const targetEmail = recipientEmail || email || body?.recipientEmail || body?.email;
+    return this.settingsService.sendTestEmail(targetEmail);
   }
 
   /**

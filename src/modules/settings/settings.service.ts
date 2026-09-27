@@ -1,5 +1,5 @@
 import * as crypto from 'crypto';
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 
@@ -595,12 +595,14 @@ export class SettingsService {
    * ১৮. টেস্ট ইমেইল পাঠানো
    */
   async sendTestEmail(recipientEmail: string) {
-    const config = await this.getNotificationSettings();
-    if (!recipientEmail) {
-      throw new Error('Recipient email is required.');
+    if (!recipientEmail || typeof recipientEmail !== 'string' || !recipientEmail.includes('@')) {
+      throw new BadRequestException('Valid recipient email address is required.');
     }
 
-    const testHtml = `
+    const config = await this.getNotificationSettings();
+
+    try {
+      const testHtml = `
 <div style="font-family: Arial, sans-serif; max-width: 540px; margin: 0 auto; background: #18181b; color: #f4f4f5; padding: 32px; border-radius: 12px; border: 1px solid #27272a;">
   <h2 style="color: #10b981; margin: 0 0 12px 0;">A2Z Outlet Store — SMTP Handshake Test 🚀</h2>
   <p style="color: #d4d4d8; font-size: 14px; line-height: 1.6;">Congratulations! Your SMTP Mail Server integration is active and working properly.</p>
@@ -612,14 +614,28 @@ export class SettingsService {
   <p style="font-size: 12px; color: #71717a; margin: 0;">Dispatched on: ${new Date().toISOString()}</p>
 </div>`.trim();
 
-    return this.mailService.sendMail({
-      to: recipientEmail,
-      subject: `[A2Z TEST] SMTP Server Handshake Verification`,
-      html: testHtml,
-      templateCode: 'TEST_EMAIL',
-      senderName: config.senderName,
-      senderEmail: config.senderEmail,
-    });
+      const result = await this.mailService.sendMail({
+        to: recipientEmail,
+        subject: `[A2Z TEST] SMTP Server Handshake Verification`,
+        html: testHtml,
+        templateCode: 'TEST_EMAIL',
+        senderName: config.senderName,
+        senderEmail: config.senderEmail,
+      });
+
+      return {
+        success: result.status === 'SENT',
+        message: result.status === 'SENT'
+          ? `Test email successfully dispatched to ${recipientEmail}!`
+          : `SMTP dispatch attempted but failed: ${result.errorMessage || 'Please check your SMTP host credentials.'}`,
+        result,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: `Failed to dispatch test email: ${err?.message || 'Check SMTP server config'}`,
+      };
+    }
   }
 
   /**
