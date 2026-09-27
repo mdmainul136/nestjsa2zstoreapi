@@ -230,8 +230,9 @@ export class CatalogController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
   @Get('categories/cleanup-stats')
-  async getCategoryCleanupStats() {
-    return this.catalogService.getCategoryCleanupStats();
+  async getCategoryCleanupStats(@Query('threshold') threshold?: string) {
+    const th = threshold ? parseInt(threshold, 10) : 5;
+    return this.catalogService.getCategoryCleanupStats(isNaN(th) ? 5 : th);
   }
 
   /**
@@ -261,8 +262,28 @@ export class CatalogController {
   @Roles('ADMIN', 'SUPERADMIN')
   @Post('categories/rollup-micro')
   async rollupMicroCategories(@Body() body?: { threshold?: number }) {
-    const threshold = typeof body?.threshold === 'number' ? body.threshold : 3;
+    const threshold = typeof body?.threshold === 'number' ? body.threshold : 5;
     return this.catalogService.rollupMicroCategories(threshold);
+  }
+
+  /**
+   * স্ট্রেই রুট ক্যাটাগরি মাস্টার ডিপার্টমেন্টে সাজানো: POST /catalog/categories/organize-roots
+   */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERADMIN')
+  @Post('categories/organize-roots')
+  async organizeRootCategories() {
+    return this.catalogService.organizeRootCategories();
+  }
+
+  /**
+   * সিলেক্টেড ক্যাটাগরি মার্জ: POST /catalog/categories/bulk-merge
+   */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERADMIN')
+  @Post('categories/bulk-merge')
+  async bulkMergeCategories(@Body() body: { sourceCategoryIds: string[]; targetCategoryId: string }) {
+    return this.catalogService.bulkMergeCategories(body.sourceCategoryIds, body.targetCategoryId);
   }
 
   /**

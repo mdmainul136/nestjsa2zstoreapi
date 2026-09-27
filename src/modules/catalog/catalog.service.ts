@@ -2946,9 +2946,9 @@ export class CatalogService {
   }
 
   /**
-   * ক্যাটাগরি ক্লিনআপ স্ট্যাটস: কতগুলো ফাঁকা (0 products & 0 children) এবং কতগুলো ডুপ্লিকেট রয়েছে
+   * ক্যাটাগরি ক্লিনআপ স্ট্যাটস: কতগুলো ফাঁকা (0 products & 0 children), কতগুলো ডুপ্লিকেট এবং কতগুলো মাইক্রো রয়েছে
    */
-  async getCategoryCleanupStats() {
+  async getCategoryCleanupStats(threshold: number = 5) {
     // ১. যে ক্যাটাগরিগুলোতে কোনো প্রোডাক্ট এবং কোনো চাইল্ড ক্যাটাগরি নেই
     const emptyLeafs = await this.prisma.category.findMany({
       where: {
@@ -2958,7 +2958,7 @@ export class CatalogService {
       select: { id: true, name: true, slug: true },
     });
 
-    // ২. সব ক্যাটাগরি এনে নামভিত্তিক ডুপ্লিকেট গ্রুপ এবং মাইক্রো-ক্যাটাগরি চিহ্নিত করা
+    // ২. সব ক্যাটাগরি এনে নামভিত্তিক ডুপ্লিকেট গ্রুপ, মাইক্রো-ক্যাটাগরি এবং স্ট্রেই রুট চিহ্নিত করা
     const allCategories = await this.prisma.category.findMany({
       select: {
         id: true,
@@ -2969,8 +2969,24 @@ export class CatalogService {
       },
     });
 
+    const masterSlugs = new Set([
+      'fashion-footwear',
+      'cosmetics-skincare',
+      'beauty-personal-care',
+      'sports-outdoors',
+      'home-kitchen',
+      'grocery-gourmet-food',
+      'smartphones-laptops',
+      'luxury-watches',
+      'health-wellness',
+      'tools-industrial',
+      'toys-games',
+      'books-media'
+    ]);
+
     const groupsByName = new Map<string, typeof allCategories>();
     let microCategoriesCount = 0;
+    let strayRootCount = 0;
 
     for (const cat of allCategories) {
       const normalized = cat.name.trim().toLowerCase();
@@ -2978,9 +2994,14 @@ export class CatalogService {
       list.push(cat);
       groupsByName.set(normalized, list);
 
-      // ৩ বা তার কম প্রোডাক্ট বিশিষ্ট সাব/চাইল্ড ক্যাটাগরি
-      if (cat.parentId && (cat._count?.children || 0) === 0 && (cat._count?.products || 0) > 0 && (cat._count?.products || 0) <= 3) {
+      // থ্রেশহোল্ড বা তার কম প্রোডাক্ট বিশিষ্ট সাব/চাইল্ড ক্যাটাগরি
+      if (cat.parentId && (cat._count?.children || 0) === 0 && (cat._count?.products || 0) <= threshold) {
         microCategoriesCount++;
+      }
+
+      // স্ট্রেই রুট: যেসব Tier 1 ক্যাটাগরি মাস্টার ডিপার্টমেন্ট নয়
+      if (!cat.parentId && !masterSlugs.has(cat.slug)) {
+        strayRootCount++;
       }
     }
 
@@ -3008,6 +3029,8 @@ export class CatalogService {
       duplicateGroupsCount,
       redundantCategoriesCount,
       microCategoriesCount,
+      strayRootCount,
+      threshold,
       sampleDuplicates,
     };
   }
@@ -3198,6 +3221,141 @@ export class CatalogService {
       mergedCount,
       productsReassigned,
       message: `${mergedCount} duplicate categories merged, ${productsReassigned} products reassigned to primary categories.`,
+    };
+  }
+
+  /**
+   * স্ট্রেই রুট (Tier 1) ক্যাটাগরিগুলোকে ৮-১০টি মূল মাস্টার ডিপার্টমেন্টে সাজানো
+   */
+  async organizeRootCategories() {
+    const masterDefs = [
+      { name: 'Fashion & Footwear', slug: 'fashion-footwear', icon: '👟' },
+      { name: 'Cosmetics & Skincare', slug: 'cosmetics-skincare', icon: '💄' },
+      { name: 'Grocery & Gourmet Food', slug: 'grocery-gourmet-food', icon: '🍎' },
+      { name: 'Sports & Outdoors', slug: 'sports-outdoors', icon: '⚽' },
+      { name: 'Home & Kitchen', slug: 'home-kitchen', icon: '🏠' },
+      { name: 'Luxury Watches', slug: 'luxury-watches', icon: '⌚' },
+      { name: 'Health & Wellness', slug: 'health-wellness', icon: '💊' },
+      { name: 'Smartphones & Electronics', slug: 'smartphones-laptops', icon: '📱' },
+      { name: 'Tools, Home & Industrial', slug: 'tools-industrial', icon: '🔧' },
+      { name: 'Toys, Kids & Baby', slug: 'toys-games', icon: '🧸' },
+      { name: 'Books & Media', slug: 'books-media', icon: '📚' },
+    ];
+
+    const masterMap = new Map<string, string>();
+    for (const def of masterDefs) {
+      let master = await this.prisma.category.findFirst({
+        where: { OR: [{ slug: def.slug }, { name: { equals: def.name, mode: 'insensitive' } }] },
+      });
+      if (!master) {
+        master = await this.prisma.category.create({
+          data: {
+            name: def.name,
+            slug: def.slug,
+            icon: def.icon,
+            parentId: null,
+            isPublished: true,
+            displayOrder: 0,
+          },
+        });
+      }
+      masterMap.set(def.slug, master.id);
+    }
+
+    const masterIds = new Set(masterMap.values());
+
+    const rootCategories = await this.prisma.category.findMany({
+      where: {
+        parentId: null,
+        id: { notIn: Array.from(masterIds) },
+      },
+    });
+
+    let organizedCount = 0;
+
+    for (const root of rootCategories) {
+      const lower = root.name.toLowerCase();
+      let targetSlug = 'fashion-footwear';
+
+      if (/shoe|sneaker|slide|cleat|boot|sandal|mule|spike|apparel|clothing|shirt|pant|footwear|dress|jacket/i.test(lower)) {
+        targetSlug = 'fashion-footwear';
+      } else if (/skin|makeup|beauty|cosmetic|fragrance|hair|perfume|cologne|lotion|lip|nail/i.test(lower)) {
+        targetSlug = 'cosmetics-skincare';
+      } else if (/food|grocery|beverage|snack|drink|candy|pantry|coffee|tea|pasta|rice|chocolate/i.test(lower)) {
+        targetSlug = 'grocery-gourmet-food';
+      } else if (/sport|fitness|workout|gym|athletic|exercise|outdoor/i.test(lower)) {
+        targetSlug = 'sports-outdoors';
+      } else if (/home|kitchen|bath|bedding|furniture|decor|patio|garden|cleaning/i.test(lower)) {
+        targetSlug = 'home-kitchen';
+      } else if (/watch/i.test(lower)) {
+        targetSlug = 'luxury-watches';
+      } else if (/vitamin|supplement|health|medicine|wellness|protein/i.test(lower)) {
+        targetSlug = 'health-wellness';
+      } else if (/phone|laptop|electronic|computer|gadget/i.test(lower)) {
+        targetSlug = 'smartphones-laptops';
+      } else if (/toy|baby|kid/i.test(lower)) {
+        targetSlug = 'toys-games';
+      } else if (/book|kindle/i.test(lower)) {
+        targetSlug = 'books-media';
+      } else if (/tool|industrial|scientific|hardware/i.test(lower)) {
+        targetSlug = 'tools-industrial';
+      }
+
+      const targetMasterId = masterMap.get(targetSlug);
+      if (targetMasterId && targetMasterId !== root.id) {
+        await this.prisma.category.update({
+          where: { id: root.id },
+          data: { parentId: targetMasterId },
+        });
+        organizedCount++;
+      }
+    }
+
+    return {
+      success: true,
+      organizedCount,
+      message: `${organizedCount} stray root categories organized under master departments.`,
+    };
+  }
+
+  /**
+   * বাল্ক সিলেক্টেড ক্যাটাগরি মার্জ (Bulk Merge Selected Categories into Target)
+   */
+  async bulkMergeCategories(sourceCategoryIds: string[], targetCategoryId: string) {
+    if (!sourceCategoryIds || sourceCategoryIds.length === 0 || !targetCategoryId) {
+      throw new BadRequestException('Source category IDs and target category ID are required');
+    }
+
+    const target = await this.prisma.category.findUnique({ where: { id: targetCategoryId } });
+    if (!target) throw new NotFoundException(`Target category ID ${targetCategoryId} not found`);
+
+    const filteredSourceIds = sourceCategoryIds.filter((id) => id !== targetCategoryId);
+    if (filteredSourceIds.length === 0) {
+      return { success: true, movedProducts: 0, deletedCount: 0 };
+    }
+
+    // ১. প্রোডাক্ট রিলিংক
+    const prodRes = await this.prisma.product.updateMany({
+      where: { categoryId: { in: filteredSourceIds } },
+      data: { categoryId: targetCategoryId },
+    });
+
+    // ২. চাইল্ড ক্যাটাগরি রিলিংক
+    await this.prisma.category.updateMany({
+      where: { parentId: { in: filteredSourceIds }, NOT: { id: targetCategoryId } },
+      data: { parentId: targetCategoryId },
+    });
+
+    // ৩. সোর্স ক্যাটাগরি ডিলিট
+    const delRes = await this.prisma.category.deleteMany({
+      where: { id: { in: filteredSourceIds } },
+    });
+
+    return {
+      success: true,
+      movedProducts: prodRes.count,
+      deletedCount: delRes.count,
+      message: `Successfully merged ${delRes.count} categories into "${target.name}". ${prodRes.count} products reassigned.`,
     };
   }
 
