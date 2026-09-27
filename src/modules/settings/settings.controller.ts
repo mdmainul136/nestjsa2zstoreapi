@@ -73,6 +73,22 @@ export class SettingsController {
   }
 
   /**
+   * ৪.৬. ইনভয়েস ডিজাইনার ও প্রিন্ট ফরম্যাট কনফিগারেশন
+   * GET & PUT /settings/invoice
+   */
+  @Get('invoice')
+  async getInvoiceSettings() {
+    return this.settingsService.getInvoiceSettings();
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERADMIN')
+  @Put('invoice')
+  async updateInvoiceSettings(@Body() data: any) {
+    return this.settingsService.updateInvoiceSettings(data);
+  }
+
+  /**
    * ৫. স্টোরফ্রন্ট সম্পূর্ণ সিএমএস কন্টেন্ট (Public for Next.js SSR)
    * GET /settings/cms
    */

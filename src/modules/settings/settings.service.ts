@@ -878,5 +878,104 @@ export class SettingsService {
 
     return this.getCheckoutFeeSettings();
   }
+
+  /**
+   * ১৬. ইনভয়েস ডিজাইনার কনফিগারেশন আনা
+   */
+  async getInvoiceSettings() {
+    const settings = await this.prisma.systemSetting.findMany({
+      where: { category: 'invoice' },
+    });
+    const map: Record<string, any> = {};
+    settings.forEach((s) => {
+      try {
+        map[s.key] = JSON.parse(s.value);
+      } catch {
+        map[s.key] = s.value;
+      }
+    });
+
+    const store = await this.prisma.storeSetting.findFirst().catch(() => null);
+
+    return {
+      companyName: map['company_name'] || store?.storeName || 'A2Z Outlet Store',
+      legalName: map['legal_name'] || 'A2Z Outlet Store Ltd.',
+      tagline: map['tagline'] || store?.tagline || 'Authentic Cross-Border Shopping Platform',
+      logoUrl: map['logo_url'] || store?.logoUrl || '',
+      binNumber: map['bin_number'] || 'BIN: 004819284-0101 (Mushak 6.3)',
+      address: map['address'] || store?.officeAddress || 'House #12, Road #4, Dhanmondi, Dhaka-1205, Bangladesh',
+      phone: map['phone'] || store?.supportPhone || '+880 1700-000000',
+      email: map['email'] || store?.supportEmail || 'billing@a2zoutletstore.com',
+      website: map['website'] || 'https://a2zoutletstore.com',
+      invoiceTitle: map['invoice_title'] || 'TAX INVOICE / CASH MEMO',
+      invoicePrefix: map['invoice_prefix'] || 'A2Z-INV-',
+      accentColor: map['accent_color'] || '#0f172a',
+      primaryTheme: map['primary_theme'] || 'modern_slate',
+      showLogo: map['show_logo'] !== undefined ? (map['show_logo'] === 'true' || map['show_logo'] === true) : true,
+      showTagline: map['show_tagline'] !== undefined ? (map['show_tagline'] === 'true' || map['show_tagline'] === true) : true,
+      showTaxBin: map['show_tax_bin'] !== undefined ? (map['show_tax_bin'] === 'true' || map['show_tax_bin'] === true) : true,
+      showBarcode: map['show_barcode'] !== undefined ? (map['show_barcode'] === 'true' || map['show_barcode'] === true) : true,
+      showSku: map['show_sku'] !== undefined ? (map['show_sku'] === 'true' || map['show_sku'] === true) : true,
+      showShippingDetails: map['show_shipping_details'] !== undefined ? (map['show_shipping_details'] === 'true' || map['show_shipping_details'] === true) : true,
+      showPaymentStatus: map['show_payment_status'] !== undefined ? (map['show_payment_status'] === 'true' || map['show_payment_status'] === true) : true,
+      showLogisticsFee: map['show_logistics_fee'] !== undefined ? (map['show_logistics_fee'] === 'true' || map['show_logistics_fee'] === true) : true,
+      showGatewayFee: map['show_gateway_fee'] !== undefined ? (map['show_gateway_fee'] === 'true' || map['show_gateway_fee'] === true) : true,
+      showSignatureBlock: map['show_signature_block'] !== undefined ? (map['show_signature_block'] === 'true' || map['show_signature_block'] === true) : true,
+      showTerms: map['show_terms'] !== undefined ? (map['show_terms'] === 'true' || map['show_terms'] === true) : true,
+      signatoryTitle: map['signatory_title'] || 'Authorized Signatory',
+      signatoryName: map['signatory_name'] || 'Accounts & Billing Department',
+      termsText: map['terms_text'] || '1. Please inspect the parcel carefully upon delivery before signing.\n2. For issues, contact customer support within 48 hours with order ID.\n3. Return & warranty applicable as per A2Z Outlet Store refund terms.',
+      footerNote: map['footer_note'] || 'This is an authentic computer-generated tax invoice. Thank you for your business!',
+    };
+  }
+
+  /**
+   * ১৭. ইনভয়েস ডিজাইনার কনফিগারেশন আপডেট করা
+   */
+  async updateInvoiceSettings(data: any) {
+    const entries: [string, any][] = [
+      ['company_name', data.companyName],
+      ['legal_name', data.legalName],
+      ['tagline', data.tagline],
+      ['logo_url', data.logoUrl],
+      ['bin_number', data.binNumber],
+      ['address', data.address],
+      ['phone', data.phone],
+      ['email', data.email],
+      ['website', data.website],
+      ['invoice_title', data.invoiceTitle],
+      ['invoice_prefix', data.invoicePrefix],
+      ['accent_color', data.accentColor],
+      ['primary_theme', data.primaryTheme],
+      ['show_logo', data.showLogo !== undefined ? !!data.showLogo : true],
+      ['show_tagline', data.showTagline !== undefined ? !!data.showTagline : true],
+      ['show_tax_bin', data.showTaxBin !== undefined ? !!data.showTaxBin : true],
+      ['show_barcode', data.showBarcode !== undefined ? !!data.showBarcode : true],
+      ['show_sku', data.showSku !== undefined ? !!data.showSku : true],
+      ['show_shipping_details', data.showShippingDetails !== undefined ? !!data.showShippingDetails : true],
+      ['show_payment_status', data.showPaymentStatus !== undefined ? !!data.showPaymentStatus : true],
+      ['show_logistics_fee', data.showLogisticsFee !== undefined ? !!data.showLogisticsFee : true],
+      ['show_gateway_fee', data.showGatewayFee !== undefined ? !!data.showGatewayFee : true],
+      ['show_signature_block', data.showSignatureBlock !== undefined ? !!data.showSignatureBlock : true],
+      ['show_terms', data.showTerms !== undefined ? !!data.showTerms : true],
+      ['signatory_title', data.signatoryTitle],
+      ['signatory_name', data.signatoryName],
+      ['terms_text', data.termsText],
+      ['footer_note', data.footerNote],
+    ];
+
+    for (const [key, val] of entries) {
+      if (val !== undefined && val !== null) {
+        const strVal = String(val);
+        await this.prisma.systemSetting.upsert({
+          where: { key },
+          update: { value: strVal, category: 'invoice' },
+          create: { key, value: strVal, category: 'invoice' },
+        });
+      }
+    }
+
+    return this.getInvoiceSettings();
+  }
 }
 
