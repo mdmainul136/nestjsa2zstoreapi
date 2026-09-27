@@ -85,6 +85,18 @@ export class OrdersController {
     );
   }
 
+  @Patch(':id/payment-status')
+  async updateOrderPaymentStatus(
+    @Param('id') id: string,
+    @Body() body: { paymentStatus: string; paymentMethod?: string },
+  ) {
+    return this.ordersService.updateOrderPaymentStatus(
+      id,
+      body.paymentStatus,
+      body.paymentMethod,
+    );
+  }
+
   @Post(':id/dispatch-courier')
   async dispatchCourier(
     @Param('id') id: string,

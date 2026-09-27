@@ -327,6 +327,38 @@ export class OrdersService {
     });
   }
 
+  async updateOrderPaymentStatus(
+    orderId: string,
+    paymentStatus: string,
+    paymentMethod?: string,
+  ) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+    });
+    if (!order) throw new NotFoundException('অর্ডার পাওয়া যায়নি');
+
+    const updateData: any = {
+      paymentStatus: paymentStatus.toUpperCase(),
+    };
+    if (paymentMethod) {
+      updateData.paymentMethod = paymentMethod.toUpperCase();
+    }
+
+    const updated = await this.prisma.order.update({
+      where: { id: orderId },
+      data: updateData,
+      include: { items: true },
+    });
+
+    if (paymentStatus.toUpperCase() === 'PAID') {
+      this.mailService.sendOrderInvoiceEmail(updated).catch((err) => {
+        this.logger.error(`Failed to send invoice email after payment update for order ${orderId}: ${err.message}`);
+      });
+    }
+
+    return updated;
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // ৫. এডমিন — সব অর্ডার তালিকা (paginated, filterable)
   // ─────────────────────────────────────────────────────────────────────────

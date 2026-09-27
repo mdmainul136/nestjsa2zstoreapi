@@ -70,10 +70,15 @@ export class PaymentsService {
     const currency = (order.currency || 'USD').toLowerCase();
     const unitAmount = Math.round(resolvedAmount * 100);
 
+    const sep = return_url.includes('?') ? '&' : '?';
+    const successUrl = `${return_url}${sep}gateway=stripe&session_id={CHECKOUT_SESSION_ID}`;
+    const cancelSep = cancel_url.includes('?') ? '&' : '?';
+    const resolvedCancelUrl = `${cancel_url}${cancelSep}gateway=stripe`;
+
     const bodyParams = new URLSearchParams();
     bodyParams.append('mode', 'payment');
-    bodyParams.append('success_url', return_url);
-    bodyParams.append('cancel_url', cancel_url);
+    bodyParams.append('success_url', successUrl);
+    bodyParams.append('cancel_url', resolvedCancelUrl);
     bodyParams.append('client_reference_id', order.id);
     if (resolvedEmail) {
       bodyParams.append('customer_email', resolvedEmail);
@@ -101,6 +106,20 @@ export class PaymentsService {
         throw new HttpException(session.error?.message || 'Failed to initialize Stripe payment', HttpStatus.BAD_REQUEST);
       }
 
+      // Save Stripe session id on the order record
+      const existingDetails = typeof order.paymentDetails === 'object' && order.paymentDetails !== null ? order.paymentDetails : {};
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: {
+          paymentMethod: 'STRIPE',
+          paymentDetails: {
+            ...existingDetails,
+            stripe_session_id: session.id,
+            stripe_url: session.url,
+          },
+        },
+      }).catch((e) => this.logger.warn(`Could not save stripe session to order: ${e.message}`));
+
       return {
         redirect_url: session.url,
         session_id: session.id,
@@ -109,6 +128,98 @@ export class PaymentsService {
       this.logger.error(`Failed to initiate Stripe payment: ${error.message}`);
       if (error instanceof HttpException) throw error;
       throw new HttpException(error.message || 'Stripe payment initiation failed', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  async verifyStripePayment(sessionId?: string, orderId?: string) {
+    if (!sessionId && !orderId) {
+      throw new HttpException('session_id or order_id is required', HttpStatus.BAD_REQUEST);
+    }
+
+    const config = await this.getStripeConfig();
+    let targetSessionId = sessionId?.trim();
+    let targetOrder: any = null;
+
+    if (orderId) {
+      targetOrder = await this.prisma.order.findUnique({
+        where: { id: orderId },
+        include: { items: true },
+      });
+      if (!targetOrder) {
+        throw new HttpException('Order not found', HttpStatus.NOT_FOUND);
+      }
+      if (!targetSessionId) {
+        const details: any = targetOrder.paymentDetails;
+        targetSessionId = details?.stripe_session_id || details?.id;
+      }
+    }
+
+    if (!targetSessionId) {
+      // If we don't have session_id but order is already marked PAID
+      if (targetOrder?.paymentStatus === 'PAID') {
+        return { success: true, status: 'PAID', order: targetOrder };
+      }
+      return { success: false, message: 'No Stripe session ID available to verify' };
+    }
+
+    try {
+      const response = await fetch(`https://api.stripe.com/v1/checkout/sessions/${targetSessionId}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${config.secretKey}`,
+        },
+      });
+
+      const session = await response.json();
+      if (!response.ok || session.error) {
+        this.logger.error(`Stripe verify session error: ${JSON.stringify(session)}`);
+        throw new HttpException(session.error?.message || 'Failed to retrieve Stripe session', HttpStatus.BAD_REQUEST);
+      }
+
+      const isPaid = session.payment_status === 'paid' || session.status === 'complete';
+      const resolvedOrderId = orderId || session.client_reference_id || session.metadata?.order_id;
+
+      if (isPaid && resolvedOrderId) {
+        const existingDetails = targetOrder?.paymentDetails && typeof targetOrder.paymentDetails === 'object' ? targetOrder.paymentDetails : {};
+        const updatedOrder = await this.prisma.order.update({
+          where: { id: resolvedOrderId },
+          data: {
+            paymentStatus: 'PAID',
+            paymentMethod: 'STRIPE',
+            gatewayTransactionId: (session.payment_intent as string) || session.id,
+            paymentDetails: {
+              ...existingDetails,
+              stripe_session_id: session.id,
+              payment_intent: session.payment_intent,
+              amount_total: session.amount_total,
+              currency: session.currency,
+              payment_status: session.payment_status,
+            },
+          },
+          include: { items: true },
+        });
+
+        this.logger.log(`Order ${resolvedOrderId} verified and marked as PAID via Stripe.`);
+
+        this.mailService.sendOrderInvoiceEmail(updatedOrder).catch((err) => {
+          this.logger.error(`Failed to send invoice email for Stripe order ${resolvedOrderId}: ${err.message}`);
+        });
+
+        return {
+          success: true,
+          status: 'PAID',
+          order: updatedOrder,
+        };
+      }
+
+      return {
+        success: isPaid,
+        status: session.payment_status || 'unpaid',
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to verify Stripe payment: ${error.message}`);
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(error.message || 'Stripe verification failed', HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 

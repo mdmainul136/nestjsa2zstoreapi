@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Req, Res, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Body, Query, Req, Res, HttpStatus } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 
 @Controller('payments')
@@ -13,5 +13,18 @@ export class PaymentsController {
   @Post('ipn')
   async handleIpn(@Body() payload: any) {
     return this.paymentsService.handleIpn(payload);
+  }
+
+  @Post('verify-stripe')
+  async verifyStripePayment(@Body() payload: { session_id?: string; order_id?: string }) {
+    return this.paymentsService.verifyStripePayment(payload.session_id, payload.order_id);
+  }
+
+  @Get('verify-stripe')
+  async verifyStripePaymentGet(
+    @Query('session_id') sessionId?: string,
+    @Query('order_id') orderId?: string,
+  ) {
+    return this.paymentsService.verifyStripePayment(sessionId, orderId);
   }
 }
