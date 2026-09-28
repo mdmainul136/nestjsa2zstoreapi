@@ -410,6 +410,28 @@ export class StorefrontController {
   }
 
   /**
+   * ব্র্যান্ড ডিরেক্টরি পেজ: GET /storefront/brands
+   */
+  @Get('brands')
+  async getStorefrontBrands(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('sortBy') sortBy?: 'products' | 'name',
+    @Query('filter') filter?: 'has_products' | 'all',
+  ) {
+    const p = Number(page) || 1;
+    const l = Math.min(Number(limit) || 100, 500);
+    return this.catalogService.getBrands({
+      page: p,
+      limit: l,
+      search,
+      sortBy: sortBy || 'products',
+      filter: filter || 'has_products',
+    });
+  }
+
+  /**
    * ৮. প্রডাক্টের ৩-ধাপের প্রাইস ব্রেকডাউন পপআপ
    * GET /storefront/products/:id/price-breakdown
    */
