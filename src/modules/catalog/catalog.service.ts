@@ -3677,6 +3677,222 @@ export class CatalogService {
     };
   }
 
+  // ─── Brand Deduplication & Merge Service ────────────────────────────────────
+
+  /**
+   * ব্র্যান্ড নাম স্বাভাবিকীকরণ (Deduplication Clustering Heuristic)
+   */
+  normalizeBrandForClustering(name: string): string {
+    if (!name) return '';
+    let n = name.toLowerCase().trim();
+    // Diacritics remove
+    n = n.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    // Punctuation like M.A.C, M·A·C, L'Oreal, e.l.f.
+    n = n.replace(/[\.\'\"\’\·\-\_]/g, '');
+    // Noise words
+    n = n.replace(/\b(inc|llc|ltd|co|corp|corporation|company)\b/g, '');
+    n = n.replace(/\b(cosmetics|cosmetic|beauty|makeup|professional|official|store|collection|brand|usa|paris|new york|labs|skincare|skin)\b/g, '');
+    n = n.replace(/\b(powder|lipstick|matte|velvetease|veluxe|eye kohl|blush|pro|eye|lip|chromacake|shade|huggable|liner|concealer|foundation|primer|palette|gloss|balm)\b/g, '');
+    n = n.replace(/\s+/g, ' ').trim();
+    return n;
+  }
+
+  /**
+   * সম্ভাব্য ডুপ্লিকেট ব্র্যান্ড ক্লাস্টার শনাক্ত করা
+   */
+  async getBrandDuplicateSuggestions(query?: { search?: string }) {
+    const where: any = {};
+    if (query?.search?.trim()) {
+      where.name = { contains: query.search.trim(), mode: 'insensitive' };
+    }
+
+    const brands = await this.prisma.brand.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        logoUrl: true,
+        aliases: true,
+        _count: { select: { products: true } },
+      },
+    });
+
+    const map = new Map<string, typeof brands>();
+    for (const b of brands) {
+      const norm = this.normalizeBrandForClustering(b.name);
+      if (!norm || norm.length < 2) continue;
+      if (!map.has(norm)) map.set(norm, []);
+      map.get(norm)!.push(b);
+    }
+
+    const clusters: Array<{
+      normalized: string;
+      primary: (typeof brands)[0];
+      duplicates: typeof brands;
+      totalProducts: number;
+    }> = [];
+
+    for (const [norm, list] of map.entries()) {
+      if (list.length > 1) {
+        // Sort: Most products first, then shortest cleanest name
+        list.sort((a, b) => {
+          if (b._count.products !== a._count.products) {
+            return b._count.products - a._count.products;
+          }
+          return a.name.length - b.name.length;
+        });
+
+        clusters.push({
+          normalized: norm,
+          primary: list[0],
+          duplicates: list.slice(1),
+          totalProducts: list.reduce((sum, item) => sum + item._count.products, 0),
+        });
+      }
+    }
+
+    clusters.sort((a, b) => b.totalProducts - a.totalProducts);
+
+    return {
+      success: true,
+      totalClusters: clusters.length,
+      clusters,
+    };
+  }
+
+  /**
+   * ব্র্যান্ড মার্জ করা: সোর্স ব্র্যান্ডগুলোর সব প্রডাক্ট টার্গেট ব্র্যান্ডে রি-অ্যাসাইন করে সোর্স ডুপ্লিকেটগুলো ডিলিট করা
+   */
+  async mergeBrands(targetBrandId: string, sourceBrandIds: string[]) {
+    if (!targetBrandId) throw new BadRequestException('targetBrandId is required');
+    if (!Array.isArray(sourceBrandIds) || sourceBrandIds.length === 0) {
+      throw new BadRequestException('sourceBrandIds must be a non-empty array');
+    }
+
+    // targetBrandId cannot be in sourceBrandIds
+    const filteredSourceIds = sourceBrandIds.filter((id) => id !== targetBrandId);
+    if (filteredSourceIds.length === 0) {
+      throw new BadRequestException('Target brand cannot be merged into itself');
+    }
+
+    const targetBrand = await this.prisma.brand.findUnique({
+      where: { id: targetBrandId },
+    });
+    if (!targetBrand) throw new NotFoundException(`Target brand ID "${targetBrandId}" not found`);
+
+    const sourceBrands = await this.prisma.brand.findMany({
+      where: { id: { in: filteredSourceIds } },
+    });
+    if (sourceBrands.length === 0) {
+      throw new NotFoundException('No valid source brands found to merge');
+    }
+
+    // ১. প্রোডাক্টগুলোর brandId আপডেট করা
+    const productUpdate = await this.prisma.product.updateMany({
+      where: { brandId: { in: filteredSourceIds } },
+      data: { brandId: targetBrandId },
+    });
+
+    // ২. Coupons, Banners, FlashSales রি-অ্যাসাইন করা (if exists)
+    try {
+      await (this.prisma as any).coupon?.updateMany({
+        where: { brandId: { in: filteredSourceIds } },
+        data: { brandId: targetBrandId },
+      });
+      await (this.prisma as any).banner?.updateMany({
+        where: { brandId: { in: filteredSourceIds } },
+        data: { brandId: targetBrandId },
+      });
+      await (this.prisma as any).flashSaleCampaign?.updateMany({
+        where: { brandId: { in: filteredSourceIds } },
+        data: { brandId: targetBrandId },
+      });
+    } catch {
+      // optional relations
+    }
+
+    // ৩. টার্গেট ব্র্যান্ডের aliases এ সোর্স নামগুলো সংরক্ষণ করা (যাতে ভবিষ্যতে স্ক্র্যাপারে এলে ডুপ্লিকেট না হয়)
+    const collectedAliases = new Set<string>(targetBrand.aliases || []);
+    for (const b of sourceBrands) {
+      collectedAliases.add(b.name);
+      if (Array.isArray(b.aliases)) {
+        b.aliases.forEach((a) => collectedAliases.add(a));
+      }
+    }
+    collectedAliases.delete(targetBrand.name);
+
+    await this.prisma.brand.update({
+      where: { id: targetBrandId },
+      data: {
+        aliases: Array.from(collectedAliases),
+      },
+    });
+
+    // ৪. সোর্স ব্র্যান্ডগুলো মুছে ফেলা
+    const deleteResult = await this.prisma.brand.deleteMany({
+      where: { id: { in: filteredSourceIds } },
+    });
+
+    this.logger.log(
+      `Merged ${deleteResult.count} brands into "${targetBrand.name}". Re-assigned ${productUpdate.count} products.`,
+    );
+
+    return {
+      success: true,
+      targetBrand: { id: targetBrand.id, name: targetBrand.name },
+      mergedCount: deleteResult.count,
+      productsReassigned: productUpdate.count,
+      aliasesAdded: Array.from(collectedAliases),
+    };
+  }
+
+  /**
+   * স্বয়ংক্রিয়ভাবে শনাক্তকৃত সব ডুপ্লিকেট ক্লাস্টার মার্জ করা
+   */
+  async autoMergeDuplicateClusters(clusterNormalizedNames?: string[]) {
+    const suggestions = await this.getBrandDuplicateSuggestions();
+    let clustersToProcess = suggestions.clusters;
+
+    if (Array.isArray(clusterNormalizedNames) && clusterNormalizedNames.length > 0) {
+      const set = new Set(clusterNormalizedNames);
+      clustersToProcess = clustersToProcess.filter((c) => set.has(c.normalized));
+    }
+
+    const results: Array<{
+      normalized: string;
+      primary: string;
+      mergedCount: number;
+      productsReassigned: number;
+    }> = [];
+
+    for (const cluster of clustersToProcess) {
+      try {
+        const sourceIds = cluster.duplicates.map((d) => d.id);
+        const res = await this.mergeBrands(cluster.primary.id, sourceIds);
+        results.push({
+          normalized: cluster.normalized,
+          primary: cluster.primary.name,
+          mergedCount: res.mergedCount,
+          productsReassigned: res.productsReassigned,
+        });
+      } catch (err: any) {
+        this.logger.warn(`Failed auto-merging cluster "${cluster.normalized}": ${err.message}`);
+      }
+    }
+
+    const totalMergedBrands = results.reduce((acc, r) => acc + r.mergedCount, 0);
+    const totalProductsReassigned = results.reduce((acc, r) => acc + r.productsReassigned, 0);
+
+    return {
+      success: true,
+      processedClusters: results.length,
+      totalMergedBrands,
+      totalProductsReassigned,
+      details: results,
+    };
+  }
+
   // ─── Product Image Ingestion to Media Library ───────────────────────────────
 
   /**

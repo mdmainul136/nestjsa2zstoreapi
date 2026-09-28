@@ -611,6 +611,37 @@ export class CatalogController {
     return this.catalogService.fetchAndSaveBrandLogo(id, body);
   }
 
+  /** GET /catalog/brands/duplicates — সম্ভাব্য ডুপ্লিকেট ব্র্যান্ড ক্লাস্টার শনাক্ত করা */
+  @ApiOperation({ summary: 'Find duplicate brand clusters' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERADMIN')
+  @Get('brands/duplicates')
+  async getBrandDuplicates(@Query('search') search?: string) {
+    return this.catalogService.getBrandDuplicateSuggestions({ search });
+  }
+
+  /** POST /catalog/brands/merge — নির্দিষ্ট ব্র্যান্ড মার্জ করা */
+  @ApiOperation({ summary: 'Merge source duplicate brands into a target brand' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERADMIN')
+  @Post('brands/merge')
+  async mergeBrands(
+    @Body() body: { targetBrandId: string; sourceBrandIds: string[] },
+  ) {
+    return this.catalogService.mergeBrands(body.targetBrandId, body.sourceBrandIds);
+  }
+
+  /** POST /catalog/brands/auto-merge-duplicates — স্বয়ংক্রিয় ডুপ্লিকেট ক্লাস্টার মার্জ */
+  @ApiOperation({ summary: 'Auto-merge detected duplicate brand clusters' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERADMIN')
+  @Post('brands/auto-merge-duplicates')
+  async autoMergeDuplicateClusters(
+    @Body() body?: { clusterNormalizedNames?: string[] },
+  ) {
+    return this.catalogService.autoMergeDuplicateClusters(body?.clusterNormalizedNames);
+  }
+
   /** PATCH /catalog/brands/:id — ব্র্যান্ড আপডেট */
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
