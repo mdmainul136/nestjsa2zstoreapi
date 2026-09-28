@@ -582,6 +582,35 @@ export class CatalogController {
     return this.catalogService.createBrand(body);
   }
 
+  /** POST /catalog/brands/auto-logos-bulk — বাল্ক ব্র্যান্ড লোগো অটোমেশন */
+  @ApiOperation({ summary: 'Auto-fetch and upload logos for multiple brands permanently to Media Library' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERADMIN')
+  @Post('brands/auto-logos-bulk')
+  async bulkAutoFetchBrandLogos(
+    @Body()
+    body?: {
+      limit?: number;
+      filter?: 'has_products' | 'all';
+      overwrite?: boolean;
+      fallback?: 'monogram' | '404';
+    },
+  ) {
+    return this.catalogService.bulkAutoFetchBrandLogos(body);
+  }
+
+  /** POST /catalog/brands/:id/auto-logo — ব্র্যান্ড লোগো অটো-ফেচ ও মিডিয়াতে পার্মানেন্ট সংরক্ষণ */
+  @ApiOperation({ summary: 'Auto-fetch single brand logo from Logo.dev and upload permanently to Media Library' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPERADMIN')
+  @Post('brands/:id/auto-logo')
+  async autoFetchBrandLogo(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body?: { fallback?: 'monogram' | '404'; size?: number },
+  ) {
+    return this.catalogService.fetchAndSaveBrandLogo(id, body);
+  }
+
   /** PATCH /catalog/brands/:id — ব্র্যান্ড আপডেট */
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')

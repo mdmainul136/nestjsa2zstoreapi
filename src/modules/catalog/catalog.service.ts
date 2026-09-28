@@ -3502,6 +3502,181 @@ export class CatalogService {
     return { success: true, message: 'ব্র্যান্ড মুছে ফেলা হয়েছে' };
   }
 
+  /**
+   * Logo.dev থেকে ব্র্যান্ড লোগো ফেচ করে লোকাল/CDN মিডিয়া লাইব্রেরিতে পার্মানেন্টলি সেভ করা
+   */
+  async fetchAndSaveBrandLogo(
+    brandId: string,
+    options?: { fallback?: 'monogram' | '404'; size?: number },
+  ) {
+    const brand = await this.prisma.brand.findUnique({ where: { id: brandId } });
+    if (!brand) throw new NotFoundException(`Brand ID "${brandId}" not found`);
+
+    const token = process.env.LOGO_DEV_TOKEN || 'pk_cXS9sLAKSeGHLHiL9Ntr_g';
+    const size = options?.size || 256;
+    const fallback = options?.fallback || 'monogram';
+
+    // ১. নাম এবং ডোমেইন ক্লিন করা
+    const cleanName = brand.name
+      .replace(/\b(Inc\.?|LLC\.?|Ltd\.?|Corp\.?|Co\.?|Corporation|Company)\b/gi, '')
+      .replace(/\s*\([^)]*\)/g, '')
+      .replace(/[^\w\s-]/g, ' ')
+      .trim();
+
+    let domain = '';
+    if (brand.website) {
+      try {
+        const u = brand.website.startsWith('http') ? brand.website : `https://${brand.website}`;
+        domain = new URL(u).hostname.replace(/^www\./, '');
+      } catch {
+        domain = '';
+      }
+    }
+
+    // ২. Logo.dev থেকে ইমেজ ফেচ করা
+    const fetchImageBuffer = async (url: string) => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      try {
+        const res = await fetch(url, {
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) a2zoutletstore/1.0',
+            'Accept': 'image/png,image/webp,image/*;q=0.8',
+          },
+        });
+        clearTimeout(timeout);
+        if (!res.ok) return null;
+        const arrayBuf = await res.arrayBuffer();
+        return Buffer.from(arrayBuf);
+      } catch {
+        clearTimeout(timeout);
+        return null;
+      }
+    };
+
+    let buffer: Buffer | null = null;
+    let usedIdentifier = '';
+
+    // ডোমেইন থাকলে ডোমেন দিয়ে ট্রাই করা
+    if (domain) {
+      const domainUrl = `https://img.logo.dev/${domain}?token=${token}&size=${size}&format=png&fallback=404`;
+      buffer = await fetchImageBuffer(domainUrl);
+      if (buffer) usedIdentifier = domain;
+    }
+
+    // ডোমেইনে না পেলে বা ডোমেইন না থাকলে ব্র্যান্ড নাম দিয়ে ট্রাই (প্রথমে 404 fallback দিয়ে)
+    if (!buffer && cleanName) {
+      const nameUrl = `https://img.logo.dev/name/${encodeURIComponent(cleanName)}?token=${token}&size=${size}&format=png&fallback=404`;
+      buffer = await fetchImageBuffer(nameUrl);
+      if (buffer) usedIdentifier = cleanName;
+    }
+
+    // যদি এখনও না পায় এবং fallback='monogram' থাকে, তখন মনোগ্রাম লোগো রিটার্ন নেওয়া
+    if (!buffer && fallback === 'monogram' && cleanName) {
+      const monogramUrl = `https://img.logo.dev/name/${encodeURIComponent(cleanName)}?token=${token}&size=${size}&format=png&fallback=monogram`;
+      buffer = await fetchImageBuffer(monogramUrl);
+      if (buffer) usedIdentifier = `${cleanName} (Monogram)`;
+    }
+
+    if (!buffer || buffer.length < 50) {
+      throw new BadRequestException(`Could not retrieve logo for brand "${brand.name}" from Logo.dev`);
+    }
+
+    // ৩. মিডিয়া লাইব্রেরির 'Brand Logos' ফোল্ডারে সেভ করা
+    const brandFolder = await this.mediaService.getOrCreateFolder('Brand Logos');
+    const slug = brand.slug || this.slugify(brand.name) || 'brand';
+    const mediaFile = await this.mediaService.saveUploadedFile({
+      buffer,
+      originalName: `${slug}-logo.png`,
+      mimeType: 'image/png',
+      folderId: brandFolder.id,
+      altText: `${brand.name} Official Logo`,
+      uploadedBy: 'Logo.dev Automation',
+    });
+
+    // ৪. ব্র্যান্ড টেবিলে logoUrl পার্মানেন্টলি আপডেট করা
+    const updatedBrand = await this.prisma.brand.update({
+      where: { id: brand.id },
+      data: { logoUrl: mediaFile.fileUrl },
+    });
+
+    this.logger.log(`Brand "${brand.name}" logo successfully uploaded permanently to media: ${mediaFile.fileUrl}`);
+
+    return {
+      success: true,
+      brand: updatedBrand,
+      logoUrl: mediaFile.fileUrl,
+      identifier: usedIdentifier,
+      mediaFileId: mediaFile.id,
+    };
+  }
+
+  /**
+   * একাধিক ব্র্যান্ডের জন্য স্বয়ংক্রিয়ভাবে লোগো ফেচ ও মিডিয়াতে সংরক্ষণ (Bulk Auto-Fetch)
+   */
+  async bulkAutoFetchBrandLogos(options?: {
+    limit?: number;
+    filter?: 'has_products' | 'all';
+    overwrite?: boolean;
+    fallback?: 'monogram' | '404';
+  }) {
+    const limit = Math.min(Math.max(Number(options?.limit) || 20, 1), 100);
+    const overwrite = !!options?.overwrite;
+    const fallback = options?.fallback || 'monogram';
+
+    const where: any = {
+      name: { notIn: ['Generic', 'Unbranded', 'Unknown', 'N/A', '', 'generic', 'unbranded'] },
+    };
+
+    if (!overwrite) {
+      where.OR = [
+        { logoUrl: null },
+        { logoUrl: '' },
+      ];
+    }
+
+    if (options?.filter === 'has_products' || !options?.filter) {
+      where.products = { some: {} };
+    }
+
+    const brands = await this.prisma.brand.findMany({
+      where,
+      take: limit,
+      orderBy: { products: { _count: 'desc' } },
+      select: { id: true, name: true, slug: true, website: true, logoUrl: true },
+    });
+
+    const results: Array<{ id: string; name: string; success: boolean; logoUrl?: string; error?: string }> = [];
+
+    // ৫টি করে সমান্তরাল ব্যাচে প্রসেস করা
+    const batchSize = 5;
+    for (let i = 0; i < brands.length; i += batchSize) {
+      const batch = brands.slice(i, i + batchSize);
+      await Promise.all(
+        batch.map(async (b) => {
+          try {
+            const res = await this.fetchAndSaveBrandLogo(b.id, { fallback });
+            results.push({ id: b.id, name: b.name, success: true, logoUrl: res.logoUrl });
+          } catch (err: any) {
+            results.push({ id: b.id, name: b.name, success: false, error: err.message });
+          }
+        }),
+      );
+    }
+
+    const succeeded = results.filter((r) => r.success).length;
+    const failed = results.filter((r) => !r.success).length;
+
+    return {
+      success: true,
+      totalRequested: brands.length,
+      succeeded,
+      failed,
+      results,
+    };
+  }
+
   // ─── Product Image Ingestion to Media Library ───────────────────────────────
 
   /**
