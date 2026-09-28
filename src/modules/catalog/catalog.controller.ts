@@ -594,6 +594,7 @@ export class CatalogController {
       filter?: 'has_products' | 'all';
       overwrite?: boolean;
       fallback?: 'monogram' | '404';
+      brandIds?: string[];
     },
   ) {
     return this.catalogService.bulkAutoFetchBrandLogos(body);

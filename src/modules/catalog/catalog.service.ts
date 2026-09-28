@@ -3620,8 +3620,13 @@ export class CatalogService {
     filter?: 'has_products' | 'all';
     overwrite?: boolean;
     fallback?: 'monogram' | '404';
+    brandIds?: string[];
   }) {
-    const limit = Math.min(Math.max(Number(options?.limit) || 20, 1), 100);
+    const selectedIds = Array.isArray(options?.brandIds) ? options.brandIds : [];
+    const isSpecificSelection = selectedIds.length > 0;
+    const limit = isSpecificSelection 
+      ? selectedIds.length 
+      : Math.min(Math.max(Number(options?.limit) || 50, 1), 5000);
     const overwrite = !!options?.overwrite;
     const fallback = options?.fallback || 'monogram';
 
@@ -3629,15 +3634,19 @@ export class CatalogService {
       name: { notIn: ['Generic', 'Unbranded', 'Unknown', 'N/A', '', 'generic', 'unbranded'] },
     };
 
-    if (!overwrite) {
-      where.OR = [
-        { logoUrl: null },
-        { logoUrl: '' },
-      ];
-    }
+    if (isSpecificSelection) {
+      where.id = { in: selectedIds };
+    } else {
+      if (!overwrite) {
+        where.OR = [
+          { logoUrl: null },
+          { logoUrl: '' },
+        ];
+      }
 
-    if (options?.filter === 'has_products' || !options?.filter) {
-      where.products = { some: {} };
+      if (options?.filter === 'has_products' || !options?.filter) {
+        where.products = { some: {} };
+      }
     }
 
     const brands = await this.prisma.brand.findMany({

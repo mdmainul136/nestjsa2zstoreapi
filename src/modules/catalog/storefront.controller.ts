@@ -421,7 +421,9 @@ export class StorefrontController {
     @Query('filter') filter?: 'has_products' | 'all',
   ) {
     const p = Number(page) || 1;
-    const l = Math.min(Number(limit) || 100, 500);
+    // সম্পূর্ণ ব্র্যান্ড ডিরেক্টরি পেজের জন্য সর্বোচ্চ ১০,০০০ ব্র্যান্ড ফেচ করার অনুমতি দেওয়া হলো
+    const parsedLimit = Number(limit);
+    const l = parsedLimit > 0 ? Math.min(parsedLimit, 10000) : 6000;
     return this.catalogService.getBrands({
       page: p,
       limit: l,
