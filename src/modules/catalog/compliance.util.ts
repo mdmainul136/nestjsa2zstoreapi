@@ -30,7 +30,8 @@ export const COMPLIANCE_RESTRICTED_KEYWORDS: string[] = [
   'clitoris',
   'clit suction',
   'clitoral stimulator',
-  'clitoral massag',
+  'clitoral massage',
+  'clitoral massager',
   'g-spot stimulator',
 
   // 3. General adult novelties & toys
@@ -38,7 +39,8 @@ export const COMPLIANCE_RESTRICTED_KEYWORDS: string[] = [
   'dildos',
   'strap-on',
   'strapon',
-  'masturbat',
+  'masturbate',
+  'masturbation',
   'masturbator',
   'fleshlight',
   'pocket pussy',
@@ -76,6 +78,17 @@ export const COMPLIANCE_RESTRICTED_KEYWORDS: string[] = [
   'orgasm gel',
 ];
 
+// পারফরম্যান্সের জন্য রেজেক্সগুলো একবারই মডিউল লোডের সময় কম্পাইল করে রাখা হলো
+const COMPILED_RESTRICTED_PATTERNS = COMPLIANCE_RESTRICTED_KEYWORDS.map((kw) => {
+  const normalized = kw.toLowerCase().trim();
+  const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return {
+    keyword: normalized,
+    // \b নিশ্চিত করে যে পুরো শব্দটি মিলেছে, আংশিক শব্দের সাথে নয় (যেমন peninsular বা openissue ম্যাচ করবে না)
+    regex: new RegExp(`\\b${escaped}\\b`, 'i'),
+  };
+});
+
 export interface ComplianceCheckResult {
   isViolation: boolean;
   matchedKeywords: string[];
@@ -97,8 +110,8 @@ export function checkComplianceViolation(input: {
     input.category || '',
     input.subcategory || '',
     Array.isArray(input.tags) ? input.tags.join(' ') : '',
-    // scan first 600 chars of description for speed & relevancy
-    (input.description || '').slice(0, 600),
+    // সম্পূর্ণ ডেসক্রিপশন স্ক্যান করা নিরাপদ, বাইপাস রোধ করতে প্রথম ৩০০০ ক্যারেক্টার স্ক্যান করা হচ্ছে
+    (input.description || '').slice(0, 3000),
   ]
     .join(' ')
     .toLowerCase();
@@ -109,19 +122,14 @@ export function checkComplianceViolation(input: {
 
   const matchedKeywords: string[] = [];
 
-  for (const keyword of COMPLIANCE_RESTRICTED_KEYWORDS) {
-    const kw = keyword.toLowerCase().trim();
-    // Match word or phrase boundary
-    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`\\b${escaped}\\b`, 'i');
-    if (regex.test(textToScan) || textToScan.includes(kw)) {
-      if (!matchedKeywords.includes(kw)) {
-        matchedKeywords.push(kw);
-      }
+  for (const { keyword, regex } of COMPILED_RESTRICTED_PATTERNS) {
+    if (regex.test(textToScan)) {
+      matchedKeywords.push(keyword);
     }
   }
 
   const isViolation = matchedKeywords.length > 0;
+
   return {
     isViolation,
     matchedKeywords,
