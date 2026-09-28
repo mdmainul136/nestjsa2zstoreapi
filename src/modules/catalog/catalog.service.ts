@@ -6,6 +6,7 @@ import { AiService } from '../ai/ai.service';
 import { MediaService } from '../media/media.service';
 import { ExtensionSyncDto } from './dto/extension-sync.dto';
 import { GetProductsQueryDto } from './dto/get-products-query.dto';
+import { checkComplianceViolation, COMPLIANCE_RESTRICTED_KEYWORDS } from './compliance.util';
 
 @Injectable()
 export class CatalogService {
@@ -747,6 +748,27 @@ export class CatalogService {
       }
     }
 
+    // 🛡️ Compliance & Restricted Items Guard (penis pumps, vibrators, erectile devices, adult novelties, etc.)
+    const compCheck = checkComplianceViolation({
+      title,
+      description: payload.description,
+      category: category?.name,
+      subcategory: payload.subcategory,
+      tags: payload.tags,
+    });
+
+    if (compCheck.isViolation) {
+      productStatus = ProductStatus.DRAFT;
+      if (!payload.tags) payload.tags = [];
+      if (!payload.tags.includes('COMPLIANCE_HOLD')) {
+        payload.tags.push('COMPLIANCE_HOLD');
+      }
+      if (!payload.tags.includes('RESTRICTED_ITEM')) {
+        payload.tags.push('RESTRICTED_ITEM');
+      }
+      this.logger.warn(`🛑 [COMPLIANCE HOLD] Product "${title}" placed on HOLD (DRAFT) due to compliance violation: ${compCheck.matchedKeywords.join(', ')}`);
+    }
+
     const explicitWeight = payload.weight_kg ?? (payload as any).weightKg ?? payload.weight;
     let resolvedWeightKg =
       explicitWeight !== undefined && explicitWeight !== null && Number(explicitWeight) > 0
@@ -1434,6 +1456,7 @@ export class CatalogService {
       totalRawScraped,
       totalArchivedRaw,
       totalArchivedProd,
+      totalComplianceHold,
     ] = await Promise.all([
       this.prisma.product.count({ where: { status: { not: 'ARCHIVED' } } }),
       this.prisma.product.count({ where: { status: 'PUBLISHED' } }),
@@ -1453,6 +1476,7 @@ export class CatalogService {
         },
       }),
       this.prisma.product.count({ where: { status: 'ARCHIVED' } }),
+      this.prisma.product.count({ where: { tags: { has: 'COMPLIANCE_HOLD' } } }),
     ]);
 
     return {
@@ -1464,6 +1488,7 @@ export class CatalogService {
       totalBrands,
       totalRawScraped,
       totalArchived: totalArchivedRaw + totalArchivedProd,
+      totalComplianceHold,
     };
   }
 
@@ -2131,20 +2156,80 @@ export class CatalogService {
       return { success: false, message: 'No product IDs provided', processed: 0 };
     }
 
-    await this.prisma.product.updateMany({
-      where: { id: { in: ids } },
-      data: { status },
-    });
+    let targetIds = ids;
+    const blockedProducts: any[] = [];
 
     if (status === ProductStatus.PUBLISHED || (status as string) === 'PUBLISHED') {
-      ids.forEach((id) => {
+      const candidateProds = await this.prisma.product.findMany({
+        where: { id: { in: ids } },
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          tags: true,
+          category: { select: { name: true } },
+        },
+      });
+
+      const safeIds: string[] = [];
+      for (const p of candidateProds) {
+        const comp = checkComplianceViolation({
+          title: p.title,
+          description: p.description,
+          category: p.category?.name,
+          tags: p.tags,
+        });
+
+        if (comp.isViolation) {
+          blockedProducts.push({
+            id: p.id,
+            title: p.title,
+            matchedKeywords: comp.matchedKeywords,
+          });
+
+          // Ensure it stays in DRAFT and gets COMPLIANCE_HOLD tag
+          const currentTags = p.tags || [];
+          const updatedTags = Array.from(new Set([...currentTags, 'COMPLIANCE_HOLD', 'RESTRICTED_ITEM']));
+          await this.prisma.product.update({
+            where: { id: p.id },
+            data: {
+              status: ProductStatus.DRAFT,
+              tags: updatedTags,
+            },
+          }).catch(() => {});
+        } else {
+          safeIds.push(p.id);
+        }
+      }
+      targetIds = safeIds;
+    }
+
+    if (targetIds.length > 0) {
+      await this.prisma.product.updateMany({
+        where: { id: { in: targetIds } },
+        data: { status },
+      });
+    }
+
+    if (status === ProductStatus.PUBLISHED || (status as string) === 'PUBLISHED') {
+      targetIds.forEach((id) => {
         this.ingestProductImages(id).catch((err: any) => {
           this.logger.warn(`Bulk auto image ingest failed for product ${id}: ${err?.message}`);
         });
       });
     }
 
-    return { success: true, message: `Successfully updated status for ${ids.length} products`, processed: ids.length };
+    const message = blockedProducts.length > 0
+      ? `Updated status for ${targetIds.length} product(s). ${blockedProducts.length} product(s) were held on DRAFT due to adult/restricted compliance rules.`
+      : `Successfully updated status for ${targetIds.length} products`;
+
+    return {
+      success: true,
+      message,
+      processed: targetIds.length,
+      blockedCount: blockedProducts.length,
+      blockedProducts,
+    };
   }
 
   async bulkDeleteProducts(ids: string[], permanent = false) {
@@ -2375,7 +2460,11 @@ export class CatalogService {
     const where: any = {};
 
     if (query.status && query.status.toLowerCase() !== 'all') {
-      where.status = query.status.toUpperCase() as ProductStatus;
+      if (query.status.toUpperCase() === 'COMPLIANCE_HOLD') {
+        where.tags = { has: 'COMPLIANCE_HOLD' };
+      } else {
+        where.status = query.status.toUpperCase() as ProductStatus;
+      }
     }
 
     if (query.inStock !== undefined && query.inStock !== 'all') {
@@ -2572,6 +2661,23 @@ export class CatalogService {
       }
       if (lastCat) {
         finalCategoryId = lastCat.id;
+      }
+    }
+
+    // 🛡️ Compliance check if publishing
+    if (data.status === 'PUBLISHED' || (!data.status && existing.status === 'PUBLISHED' && data.title)) {
+      const comp = checkComplianceViolation({
+        title: data.title || existing.title,
+        description: data.description || existing.description,
+        tags: data.tags || existing.tags,
+      });
+      if (comp.isViolation) {
+        data.status = ProductStatus.DRAFT;
+        const currentTags = data.tags || existing.tags || [];
+        data.tags = Array.from(new Set([...currentTags, 'COMPLIANCE_HOLD', 'RESTRICTED_ITEM']));
+        throw new BadRequestException(
+          `Compliance Violation: Product contains restricted adult/sexual devices (${comp.matchedKeywords.join(', ')}). Product is on HOLD (Draft) and cannot be published.`
+        );
       }
     }
 
@@ -3601,6 +3707,71 @@ export class CatalogService {
     });
 
     return { success: true, message: 'ভ্যারিয়েন্ট মুছে ফেলা হয়েছে' };
+  }
+
+  /**
+   * 🛡️ Catalog Compliance Sweep:
+   * Scans all products in the database for prohibited/adult/restricted novelties (vibrators, penis pumps, erectile devices, etc.)
+   * and automatically updates them to DRAFT (HOLD) status with COMPLIANCE_HOLD tag.
+   */
+  async sweepAndHoldComplianceProducts() {
+    this.logger.log('🛡️ Starting catalog compliance sweep for restricted adult / sexual wellness devices...');
+    const orConditions: any[] = COMPLIANCE_RESTRICTED_KEYWORDS.map((kw) => ({
+      title: { contains: kw, mode: 'insensitive' },
+    }));
+
+    const matchingProducts = await this.prisma.product.findMany({
+      where: {
+        OR: orConditions,
+      },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        tags: true,
+        description: true,
+        category: { select: { name: true } },
+      },
+    });
+
+    const heldList: any[] = [];
+    for (const prod of matchingProducts) {
+      const comp = checkComplianceViolation({
+        title: prod.title,
+        description: prod.description,
+        category: prod.category?.name,
+        tags: prod.tags,
+      });
+
+      if (comp.isViolation) {
+        const existingTags = prod.tags || [];
+        const updatedTags = Array.from(new Set([...existingTags, 'COMPLIANCE_HOLD', 'RESTRICTED_ITEM']));
+
+        await this.prisma.product.update({
+          where: { id: prod.id },
+          data: {
+            status: ProductStatus.DRAFT,
+            tags: updatedTags,
+          },
+        });
+
+        heldList.push({
+          id: prod.id,
+          title: prod.title,
+          previousStatus: prod.status,
+          currentStatus: 'DRAFT (COMPLIANCE_HOLD)',
+          matchedKeywords: comp.matchedKeywords,
+        });
+      }
+    }
+
+    this.logger.log(`🛡️ Compliance sweep finished: ${heldList.length} products put on Compliance HOLD.`);
+    return {
+      success: true,
+      message: `Compliance sweep completed. ${heldList.length} product(s) placed on Compliance HOLD (DRAFT).`,
+      totalHeld: heldList.length,
+      heldProducts: heldList,
+    };
   }
 }
 

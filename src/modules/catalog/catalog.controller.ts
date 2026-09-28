@@ -376,6 +376,15 @@ export class CatalogController {
   }
 
   /**
+   * ক্যাটালগ কমপ্লায়েন্স সুইপ (নিষিদ্ধ / এডাল্ট প্রোডাক্ট হোল্ড করা): POST /catalog/compliance/sweep
+   */
+  @ApiOperation({ summary: 'ক্যাটালগ কমপ্লায়েন্স সুইপ (নিষিদ্ধ / এডাল্ট প্রোডাক্ট হোল্ড করা)' })
+  @Post('compliance/sweep')
+  async sweepComplianceProducts() {
+    return this.catalogService.sweepAndHoldComplianceProducts();
+  }
+
+  /**
    * মাল্টিপল প্রডাক্ট বাল্ক ডিলিট (আর্কাইভ বা পার্মানেন্ট): POST /catalog/products/bulk-delete
    */
   @ApiOperation({ summary: 'মাল্টিপল প্রডাক্ট বাল্ক ডিলিট' })

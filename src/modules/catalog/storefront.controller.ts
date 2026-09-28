@@ -278,6 +278,9 @@ export class StorefrontController {
   async getProductBySlug(@Param('slug') slug: string) {
     try {
       let product = await this.catalogService.getProductBySlug(slug);
+      if (!product || product.status !== 'PUBLISHED') {
+        return { success: false, data: null, message: 'Product not available' };
+      }
       product = await this.applyDynamicPricing(product);
       return { success: true, data: product };
     } catch (e) {
@@ -301,6 +304,9 @@ export class StorefrontController {
         reviews: { where: { isApproved: true } },
       },
     });
+    if (!product || product.status !== 'PUBLISHED') {
+      return { success: false, data: null, message: 'Product not available' };
+    }
     product = await this.applyDynamicPricing(product);
     return { success: true, data: product };
   }
