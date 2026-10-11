@@ -22,6 +22,7 @@ services:
       - APP_ENV=production
       - APP_URL=${APP_URL:-https://api.a2zoutletstore.com}
       - CDN_URL=${CDN_URL:-https://cdn.a2zoutletstore.com}
+      - REMOTE_UPLOADS_URL=${REMOTE_UPLOADS_URL:-https://cdn.a2zoutletstore.com}
       - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:a2zstore2026a@postgres:5432/a2zstore?schema=public}
       - REDIS_HOST=${REDIS_HOST:-redis}
       - REDIS_PORT=${REDIS_PORT:-6379}

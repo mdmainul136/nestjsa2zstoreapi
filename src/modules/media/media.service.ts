@@ -129,7 +129,17 @@ export class MediaService {
   }) {
     const { buffer, originalName, mimeType, folderId, uploadedBy, altText } = params;
 
-    const ext = path.extname(originalName) || '.jpg';
+    let ext = path.extname(originalName) || '';
+    const VALID_EXTS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg', '.avif', '.pdf', '.ico'];
+    if (!ext || !VALID_EXTS.includes(ext.toLowerCase())) {
+      if (mimeType.includes('png')) ext = '.png';
+      else if (mimeType.includes('webp')) ext = '.webp';
+      else if (mimeType.includes('svg')) ext = '.svg';
+      else if (mimeType.includes('gif')) ext = '.gif';
+      else if (mimeType.includes('avif')) ext = '.avif';
+      else if (mimeType.includes('pdf')) ext = '.pdf';
+      else ext = '.jpg';
+    }
     const randomHex = crypto.randomBytes(12).toString('hex');
     const fileName = `${Date.now()}-${randomHex}${ext.toLowerCase()}`;
     const filePath = path.join(this.uploadDir, fileName);
