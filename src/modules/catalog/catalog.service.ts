@@ -1330,6 +1330,10 @@ export class CatalogService {
       if (query.minPrice) where.sellingPrice.gte = Number(query.minPrice);
       if (query.maxPrice) where.sellingPrice.lte = Number(query.maxPrice);
     }
+    if (query.source && query.source.toLowerCase() !== 'all') {
+      where.source = { equals: query.source.trim(), mode: 'insensitive' };
+    }
+
     if ((query as any).has_discount === 'true' || (query as any).has_discount === true || (query as any).deal === 'true') {
       where.comparePrice = { not: null, gt: 0 };
     }

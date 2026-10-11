@@ -167,6 +167,7 @@ export class StorefrontController {
         limit: query.limit,
         category: query.category,
         brand: query.brand,
+        source: query.source,
         minPrice: query.min_price || query.minPrice,
         maxPrice: query.max_price || query.maxPrice,
         sort: query.sort_by || query.sort,
