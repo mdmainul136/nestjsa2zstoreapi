@@ -242,6 +242,33 @@ export class PricingService {
 
     try {
       const catSearch = params.categoryName || categoryRule?.categoryName || 'General';
+      let tier1Name: string | null = null;
+
+      // Look up category tree to resolve Tier 1 root department
+      if (params.categoryId || (params.categoryName && params.categoryName !== 'General')) {
+        try {
+          const foundCat = await this.prisma.category.findFirst({
+            where: {
+              OR: [
+                ...(params.categoryId ? [{ id: params.categoryId }] : []),
+                ...(params.categoryName ? [{ name: { equals: params.categoryName, mode: 'insensitive' as const } }] : []),
+              ],
+            },
+            include: { parent: { include: { parent: true } } },
+          });
+
+          if (foundCat) {
+            if (!foundCat.parentId) {
+              tier1Name = foundCat.name;
+            } else if (foundCat.parent && !foundCat.parent.parentId) {
+              tier1Name = foundCat.parent.name;
+            } else if (foundCat.parent?.parent) {
+              tier1Name = foundCat.parent.parent.name;
+            }
+          }
+        } catch {}
+      }
+
       const shippingRateRecord = await this.prisma.shippingRate.findFirst({
         where: {
           originCountry,
@@ -251,6 +278,10 @@ export class PricingService {
           OR: [
             { category: { equals: catSearch, mode: 'insensitive' } },
             { category: { contains: catSearch, mode: 'insensitive' } },
+            ...(tier1Name ? [
+              { category: { equals: tier1Name, mode: 'insensitive' as const } },
+              { category: { contains: tier1Name, mode: 'insensitive' as const } },
+            ] : []),
             { category: 'General Cargo' },
             { category: 'General' },
           ],
