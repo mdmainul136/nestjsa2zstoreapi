@@ -332,10 +332,21 @@ export class SearchService implements OnModuleInit {
 
     const q = dto.q?.trim();
 
-    // ─── CASE A: যখন সার্চ কিওয়ার্ড দেওয়া হয়েছে (Native PostgreSQL GIN + Trigram Engine) ───
+    // ─── CASE A: যখন সার্চ কিওয়ার্ড দেওয়া হয়েছে (Ultra-Fast Indexed GIN Trigram & Brand-Aware Engine) ───
     if (q) {
       const sanitized = q.replace(/['"\\]/g, '').trim();
       const likeQuery = `%${sanitized}%`;
+
+      // ১. সার্চ টার্মটি কি কোনো পরিচিত ব্র্যান্ডের সাথে মিলে যায়? (যেমন 'mac' -> brand 'MAC', 'nike' -> brand 'Nike')
+      const matchedBrand = await this.prisma.brand.findFirst({
+        where: {
+          OR: [
+            { name: { equals: sanitized, mode: 'insensitive' } },
+            { slug: { equals: sanitized.toLowerCase() } },
+          ],
+        },
+        select: { id: true, name: true, slug: true },
+      });
 
       // অতিরিক্ত ফিল্টারস বিল্ড করা
       const extraFilters: string[] = [];
@@ -371,22 +382,66 @@ export class SearchService implements OnModuleInit {
 
       const extraWhere = extraFilters.length > 0 ? `AND ${extraFilters.join(' AND ')}` : '';
 
-      // সর্টিং নির্ধারণ
+      // সর্টিং নির্ধারণ: সার্চ করার সময় রেলিভেন্স (rank_score) সবসময় সবার আগে থাকবে
       let orderClause = 'ORDER BY rank_score DESC';
-      if (dto.sort === 'price_low') orderClause = 'ORDER BY p."sellingPrice" ASC, rank_score DESC';
-      else if (dto.sort === 'price_high') orderClause = 'ORDER BY p."sellingPrice" DESC, rank_score DESC';
-      else if (dto.sort === 'newest') orderClause = 'ORDER BY p."createdAt" DESC';
-      else if (dto.sort === 'popular') orderClause = 'ORDER BY p."reviewCount" DESC, rank_score DESC';
+      if (dto.sort === 'price_low' || dto.sort === 'price_asc') {
+        orderClause = 'ORDER BY p."sellingPrice" ASC, rank_score DESC';
+      } else if (dto.sort === 'price_high' || dto.sort === 'price_desc') {
+        orderClause = 'ORDER BY p."sellingPrice" DESC, rank_score DESC';
+      } else if (dto.sort === 'newest') {
+        orderClause = 'ORDER BY rank_score DESC, p."createdAt" DESC';
+      } else if (dto.sort === 'popular' || dto.sort === 'rating') {
+        orderClause = 'ORDER BY rank_score DESC, p."rating" DESC';
+      } else {
+        orderClause = 'ORDER BY rank_score DESC';
+      }
 
-      // ডায়নামিক ওয়েইটস ও ফাজি টলারেন্স লোড
-      const config = (await this.prisma.indexingConfig.findFirst()) as any;
-      const titleW = config?.titleWeight ?? 40;
-      const asinW = config?.asinSkuWeight ?? 25;
-      const brandW = config?.brandWeight ?? 20;
-      const popW = config?.popularityWeight ?? 15;
-      const typoTol = config?.typoTolerance ?? true;
-      const titleSimThreshold = typoTol ? 0.22 : 0.45;
-      const brandSimThreshold = typoTol ? 0.35 : 0.60;
+      const isShortWord = sanitized.length <= 3;
+      let searchWhereClause = '';
+
+      if (isShortWord) {
+        // ৩ অক্ষরের কম শব্দের ক্ষেত্রে (যেমন 'mac', 'tea', 'oil')
+        // substring match 'ILIKE %mac%' করলে machines বা stomach এ ভুল ম্যাচ করে ফেলে
+        // তাই Brand match অথবা Title word boundary / prefix match ব্যবহার হবে
+        if (matchedBrand) {
+          searchWhereClause = `
+            (
+              p."brandId" = '${matchedBrand.id}'
+              OR b.name ILIKE $1
+              OR p.title ILIKE ($1 || ' %')
+              OR p.title ILIKE ('% ' || $1 || ' %')
+              OR p.title ILIKE ('% ' || $1)
+              OR p.title ILIKE $1
+              OR p.asin ILIKE $1
+              OR p.sku ILIKE $1
+            )
+          `;
+        } else {
+          searchWhereClause = `
+            (
+              b.name ILIKE $1
+              OR b.name ILIKE ($1 || ' %')
+              OR p.title ILIKE ($1 || ' %')
+              OR p.title ILIKE ('% ' || $1 || ' %')
+              OR p.title ILIKE ('% ' || $1)
+              OR p.title ILIKE $1
+              OR p.asin ILIKE $1
+              OR p.sku ILIKE $1
+            )
+          `;
+        }
+      } else {
+        searchWhereClause = `
+          (
+            ${matchedBrand ? `p."brandId" = '${matchedBrand.id}' OR ` : ''}
+            p.title ILIKE $2
+            OR b.name ILIKE $2
+            OR p.asin ILIKE $2
+            OR p.sku ILIKE $2
+            OR c.name ILIKE $2
+          )
+        `;
+      }
 
       try {
         const querySql = `
@@ -397,9 +452,11 @@ export class SearchService implements OnModuleInit {
             p.asin,
             p.sku,
             p.source,
+            p."imageUrl",
             p."sourcePrice",
             p."sellingPrice",
             p."discountPrice",
+            p."comparePrice",
             p.stock,
             p.images,
             p.rating,
@@ -414,33 +471,28 @@ export class SearchService implements OnModuleInit {
             c.name as "category_name",
             c.slug as "category_slug",
             (
-              -- ১. Exact ASIN বা SKU ম্যাচ (${asinW}% base)
-              (CASE WHEN lower(coalesce(p.asin, '')) = lower($1) OR lower(coalesce(p.sku, '')) = lower($1) THEN (${asinW} * 4.0) ELSE 0.0 END) +
-              -- ২. টাইটেল প্রিফিক্স ও ট্রাইগ্রাম ম্যাচ (${titleW}% base)
-              (CASE WHEN lower(p.title) LIKE lower($1 || '%') THEN (${titleW} * 0.75) ELSE 0.0 END) +
-              (word_similarity($1, coalesce(p.title, '')) * (${titleW} * 0.875)) +
-              -- ৩. ব্র্যান্ড Word Similarity (${brandW}% base)
-              (word_similarity($1, coalesce(b.name, '')) * ${brandW}) +
-              -- ৪. ফুল-টেক্সট সার্চ BM25 র্যাংক (২৫ পয়েন্ট)
-              (CASE WHEN to_tsvector('english', coalesce(p.title, '') || ' ' || coalesce(p.description, '')) @@ websearch_to_tsquery('english', $1) THEN 25.0 ELSE 0.0 END) +
-              -- ৫. বিজনেস বুস্টিং: ইন-স্টক (+১৫ পয়েন্ট)
-              (CASE WHEN p.stock > 0 THEN 15.0 ELSE -30.0 END) +
-              -- ৬. সোশ্যাল প্রুফ: রেটিং ও রিভিউ বুস্টিং (${popW}% base)
-              (((coalesce(p.rating, 0.0) / 5.0) * 5.0 + ln(coalesce(p."reviewCount", 0) + 1) * 1.5) * (${popW} / 15.0))
+              -- ১. Exact Brand Match (১০০০ পয়েন্ট)
+              (CASE WHEN lower(coalesce(b.name, '')) = lower($1) OR lower(coalesce(b.slug, '')) = lower($1) THEN 1000.0 ELSE 0.0 END) +
+              -- ২. Brand Starts With ($1) (৫০০ পয়েন্ট)
+              (CASE WHEN lower(coalesce(b.name, '')) LIKE lower($1 || '%') THEN 500.0 ELSE 0.0 END) +
+              -- ৩. Exact ASIN or SKU Match (৮০০ পয়েন্ট)
+              (CASE WHEN lower(coalesce(p.asin, '')) = lower($1) OR lower(coalesce(p.sku, '')) = lower($1) THEN 800.0 ELSE 0.0 END) +
+              -- ৪. Title Starts With ($1) (৪০০ পয়েন্ট)
+              (CASE WHEN lower(p.title) LIKE lower($1 || '%') THEN 400.0 ELSE 0.0 END) +
+              -- ৫. Title Contains Whole Word ($1) (২০০ পয়েন্ট)
+              (CASE WHEN lower(p.title) LIKE lower('% ' || $1 || ' %') OR lower(p.title) LIKE lower('% ' || $1) THEN 200.0 ELSE 0.0 END) +
+              -- ৬. Title Contains Substring ($1) (৫০ পয়েন্ট)
+              (CASE WHEN lower(p.title) LIKE lower('%' || $1 || '%') THEN 50.0 ELSE 0.0 END) +
+              -- ৭. ইন-স্টক বুস্টিং (২০ পয়েন্ট)
+              (CASE WHEN p.stock > 0 THEN 20.0 ELSE -50.0 END) +
+              -- ৮. সোশ্যাল প্রুফ: রেটিং ও রিভিউ বুস্টিং (১০ পয়েন্ট)
+              (coalesce(p.rating, 0.0) * 2.0)
             ) AS rank_score
           FROM "Product" p
           LEFT JOIN "Brand" b ON p."brandId" = b.id
           LEFT JOIN "Category" c ON p."categoryId" = c.id
           WHERE 
-            (
-              p.asin ILIKE $2
-              OR p.sku ILIKE $2
-              OR p.title ILIKE $2
-              OR b.name ILIKE $2
-              OR word_similarity($1, coalesce(p.title, '')) > ${titleSimThreshold}
-              OR word_similarity($1, coalesce(b.name, '')) > ${brandSimThreshold}
-              OR to_tsvector('english', coalesce(p.title, '') || ' ' || coalesce(p.description, '')) @@ websearch_to_tsquery('english', $1)
-            )
+            ${searchWhereClause}
             ${extraWhere}
           ${orderClause}
           LIMIT $3 OFFSET $4;
@@ -452,15 +504,7 @@ export class SearchService implements OnModuleInit {
           LEFT JOIN "Brand" b ON p."brandId" = b.id
           LEFT JOIN "Category" c ON p."categoryId" = c.id
           WHERE 
-            (
-              p.asin ILIKE $2
-              OR p.sku ILIKE $2
-              OR p.title ILIKE $2
-              OR b.name ILIKE $2
-              OR word_similarity($1, coalesce(p.title, '')) > ${titleSimThreshold}
-              OR word_similarity($1, coalesce(b.name, '')) > ${brandSimThreshold}
-              OR to_tsvector('english', coalesce(p.title, '') || ' ' || coalesce(p.description, '')) @@ websearch_to_tsquery('english', $1)
-            )
+            ${searchWhereClause}
             ${extraWhere};
         `;
 
@@ -478,10 +522,9 @@ export class SearchService implements OnModuleInit {
         let didYouMean: string | null = null;
         if (total === 0) {
           const suggestions = (await this.prisma.$queryRawUnsafe<any[]>(`
-            SELECT title, word_similarity($1, title) as sim
+            SELECT title
             FROM "Product"
-            WHERE word_similarity($1, title) > 0.15
-            ORDER BY sim DESC
+            WHERE title ILIKE ($1 || '%') OR title ILIKE ('% ' || $1 || '%')
             LIMIT 1;
           `, sanitized).catch(() => [])) as any[];
 
@@ -492,37 +535,44 @@ export class SearchService implements OnModuleInit {
 
         return {
           success: true,
-          engine: 'PostgreSQL Native GIN Trigram + BM25 Full-Text',
+          engine: 'PostgreSQL GIN Indexed Trigram + Brand Engine',
           query: sanitized,
           didYouMean,
-          items: rows.map((r) => ({
-            id: r.id,
-            title: r.title,
-            slug: r.slug,
-            asin: r.asin,
-            sku: r.sku,
-            source: r.source,
-            sourcePrice: r.sourcePrice,
-            sellingPrice: r.sellingPrice,
-            discountPrice: r.discountPrice,
-            stock: r.stock,
-            images: r.images || [],
-            rating: r.rating,
-            reviewCount: r.reviewCount,
-            status: r.status,
-            createdAt: r.createdAt,
-            updatedAt: r.updatedAt,
-            relevanceScore: Math.round((Number(r.rank_score) || 0) * 10) / 10,
-            brand: r.brand_name ? { id: r.brand_id, name: r.brand_name, slug: r.brand_slug } : null,
-            category: r.category_name ? { id: r.category_id, name: r.category_name, slug: r.category_slug } : null,
-          })),
+          items: rows.map((r) => {
+            const rawImages = Array.isArray(r.images) ? r.images : [];
+            const primaryImg = r.imageUrl || (rawImages.length > 0 ? (typeof rawImages[0] === 'string' ? rawImages[0] : rawImages[0]?.url) : null);
+            return {
+              id: r.id,
+              title: r.title,
+              slug: r.slug,
+              asin: r.asin,
+              sku: r.sku,
+              source: r.source,
+              imageUrl: primaryImg,
+              image: primaryImg,
+              images: rawImages,
+              sourcePrice: r.sourcePrice,
+              sellingPrice: r.sellingPrice,
+              discountPrice: r.discountPrice,
+              comparePrice: r.comparePrice,
+              stock: r.stock,
+              rating: r.rating,
+              reviewCount: r.reviewCount,
+              status: r.status,
+              createdAt: r.createdAt,
+              updatedAt: r.updatedAt,
+              relevanceScore: Math.round((Number(r.rank_score) || 0) * 10) / 10,
+              brand: r.brand_name ? { id: r.brand_id, name: r.brand_name, slug: r.brand_slug } : null,
+              category: r.category_name ? { id: r.category_id, name: r.category_name, slug: r.category_slug } : null,
+            };
+          }),
           total,
           page,
           limit,
           totalPages: Math.ceil(total / limit),
         };
       } catch (err: any) {
-        this.logger.error(`PostgreSQL Native FTS search failed, falling back to Prisma: ${err.message}`);
+        this.logger.error(`PostgreSQL search query failed, falling back to Prisma: ${err.message}`);
       }
     }
 
@@ -540,12 +590,26 @@ export class SearchService implements OnModuleInit {
     const q = dto.q?.trim();
 
     if (q) {
-      where.OR = [
+      const matchedBrand = await this.prisma.brand.findFirst({
+        where: {
+          OR: [
+            { name: { equals: q, mode: 'insensitive' } },
+            { slug: { equals: q.toLowerCase() } },
+          ],
+        },
+        select: { id: true },
+      });
+
+      const orConditions: any[] = [
         { title: { contains: q, mode: 'insensitive' } },
         { asin: { contains: q, mode: 'insensitive' } },
         { sku: { contains: q, mode: 'insensitive' } },
         { brand: { name: { contains: q, mode: 'insensitive' } } },
       ];
+      if (matchedBrand) {
+        orConditions.push({ brandId: matchedBrand.id });
+      }
+      where.OR = orConditions;
     }
 
     if (dto.status && dto.status.toLowerCase() !== 'all') {
@@ -605,10 +669,20 @@ export class SearchService implements OnModuleInit {
       this.prisma.product.count({ where }),
     ]);
 
+    const mappedItems = items.map((p: any) => {
+      const rawImgs = Array.isArray(p.images) ? p.images : [];
+      const primary = p.imageUrl || (rawImgs.length > 0 ? (typeof rawImgs[0] === 'string' ? rawImgs[0] : (rawImgs[0] as any)?.url) : null);
+      return {
+        ...p,
+        imageUrl: primary,
+        image: primary,
+      };
+    });
+
     return {
       success: true,
       engine: 'Prisma Standard Faceted',
-      items,
+      items: mappedItems,
       total,
       page,
       limit,

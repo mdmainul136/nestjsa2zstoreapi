@@ -30,7 +30,14 @@ export class StorefrontController {
   ) {}
 
   private async applyDynamicPricing(product: any) {
-    if (!product || !product.sourcePrice || product.sourcePrice <= 0) return product;
+    if (!product) return product;
+    const rawImages = Array.isArray(product.images) ? product.images : [];
+    const primary = product.imageUrl || product.image || (rawImages.length > 0 ? (typeof rawImages[0] === 'string' ? rawImages[0] : (rawImages[0] as any)?.url) : null);
+    product.imageUrl = primary;
+    product.image = primary;
+    product.images = rawImages;
+
+    if (!product.sourcePrice || product.sourcePrice <= 0) return product;
     try {
       const bd = await this.pricingService.calculateLandedPrice({
         sourcePriceUsd: product.sourcePrice,
@@ -47,6 +54,9 @@ export class StorefrontController {
       const finalPrice = bd.finalSellingPriceBdt;
       return {
         ...product,
+        imageUrl: primary,
+        image: primary,
+        images: rawImages,
         sellingPrice: finalPrice,
         comparePrice: finalPrice > product.sellingPrice ? Math.round(finalPrice * 1.1) : product.comparePrice,
       };
