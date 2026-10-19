@@ -10,6 +10,7 @@ function isBrokenUrl(u) {
     s.includes('cdn.a2zoutletstore.com/uploads') ||
     s.startsWith('/uploads') ||
     s.includes('/uploads/') ||
+    s.includes('.avif') ||
     s.includes('placeholder.png')
   );
 }
@@ -63,13 +64,16 @@ function extractOriginalImages(raw) {
   }
 
   // 5. Variations
-  const rawVars = rawObj.product?.variations || rawObj.variations || rawObj.data?.variations || [];
+  const rawVars = rawObj.product?.variations || rawObj.variations || rawObj.data?.variations || rawObj.data?.variants || [];
   const variations = Array.isArray(rawVars) ? rawVars : Object.values(rawVars);
 
   for (const v of variations) {
     add(v?.swatch);
     add(v?.image);
     add(v?.image_url);
+    add(v?.skuImages?.image);
+    add(v?.skuImages?.small);
+    add(v?.imageUrl);
   }
 
   const unique = Array.from(new Set(images));
@@ -79,7 +83,7 @@ function extractOriginalImages(raw) {
 }
 
 async function run() {
-  console.log('=== STARTING COMPLETE BULK IMAGE & VARIANT RESTORATION ===');
+  console.log('=== STARTING COMPLETE BULK IMAGE & VARIANT (.AVIF) RESTORATION ===');
   const startTime = Date.now();
 
   const brokenCondition = `
@@ -89,6 +93,8 @@ async function run() {
       OR "imageUrl" LIKE '%cdn.a2zoutletstore.com/uploads%'
       OR "imageUrl" LIKE '%/uploads/%'
       OR "imageUrl" LIKE '/uploads%'
+      OR "imageUrl" LIKE '%.avif%'
+      OR "imageUrl" IS NULL
     )
   `;
 
@@ -102,7 +108,7 @@ async function run() {
   const initialProdCount = totalBrokenProducts[0]?.count || 0;
   const initialVarCount = totalBrokenVariants[0]?.count || 0;
   console.log(`Initial broken products to restore: ${initialProdCount}`);
-  console.log(`Initial broken variants to restore: ${initialVarCount}`);
+  console.log(`Initial broken variants (.avif/uploads) to restore: ${initialVarCount}`);
 
   const BATCH_SIZE = 500;
   let totalProcessed = 0;
@@ -123,6 +129,7 @@ async function run() {
           OR p."imageUrl" LIKE '%cdn.a2zoutletstore.com/uploads%'
           OR p."imageUrl" LIKE '%/uploads/%'
           OR p."imageUrl" LIKE '/uploads%'
+          OR p."imageUrl" LIKE '%.avif%'
           OR EXISTS (
             SELECT 1 FROM "Variant" v 
             WHERE v."productId" = p.id 
@@ -132,6 +139,8 @@ async function run() {
                 OR v."imageUrl" LIKE '%cdn.a2zoutletstore.com/uploads%'
                 OR v."imageUrl" LIKE '%/uploads/%'
                 OR v."imageUrl" LIKE '/uploads%'
+                OR v."imageUrl" LIKE '%.avif%'
+                OR v."imageUrl" IS NULL
               )
           )
         )
@@ -178,16 +187,28 @@ async function run() {
                 OR "imageUrl" LIKE '%cdn.a2zoutletstore.com/uploads%'
                 OR "imageUrl" LIKE '%/uploads/%'
                 OR "imageUrl" LIKE '/uploads%'
+                OR "imageUrl" LIKE '%.avif%'
                 OR "imageUrl" IS NULL
               )
           `);
 
           for (const v of variants) {
             const match = variations.find(rawV => 
-              (v.sku && (rawV.variant_asin === v.sku || rawV.sku === v.sku || rawV.asin === v.sku || rawV.id === v.sku)) ||
-              (v.title && (rawV.name === v.title || rawV.title === v.title || rawV.color === v.title))
+              (v.sku && (
+                String(rawV.variant_asin) === String(v.sku) ||
+                String(rawV.sku) === String(v.sku) ||
+                String(rawV.asin) === String(v.sku) ||
+                String(rawV.skuId) === String(v.sku) ||
+                String(rawV.id) === String(v.sku)
+              )) ||
+              (v.title && (
+                rawV.name === v.title ||
+                rawV.title === v.title ||
+                rawV.color === v.title ||
+                rawV.variationValue === v.title
+              ))
             );
-            const rawVarImg = match?.swatch || match?.image || match?.image_url || primary;
+            const rawVarImg = match?.swatch || match?.image || match?.image_url || match?.skuImages?.image || match?.skuImages?.small || match?.imageUrl || primary;
             const normVarImg = normalizeUrl(rawVarImg);
             if (isGoodUrl(normVarImg)) {
               await prisma.variant.update({
@@ -220,6 +241,7 @@ async function run() {
       OR p."imageUrl" LIKE '%cdn.a2zoutletstore.com/uploads%'
       OR p."imageUrl" LIKE '%/uploads/%'
       OR p."imageUrl" LIKE '/uploads%'
+      OR p."imageUrl" LIKE '%.avif%'
     )
     LIMIT 3000
   `);
@@ -241,7 +263,7 @@ async function run() {
     }
   }
 
-  // PASS 3: Fallback sync for remaining broken variants to parent product's good imageUrl
+  // PASS 3: Fallback sync for ANY remaining broken variants to parent product's good imageUrl
   console.log('Syncing any remaining broken variants with parent product image...');
   const pass3Result = await prisma.$executeRawUnsafe(`
     UPDATE "Variant" v
@@ -254,12 +276,15 @@ async function run() {
         OR v."imageUrl" LIKE '%cdn.a2zoutletstore.com/uploads%'
         OR v."imageUrl" LIKE '%/uploads/%'
         OR v."imageUrl" LIKE '/uploads%'
+        OR v."imageUrl" LIKE '%.avif%'
+        OR v."imageUrl" IS NULL
       )
       AND p."imageUrl" NOT LIKE '%media.a2zoutletstore.com%'
       AND p."imageUrl" NOT LIKE '%r2.cloudflarestorage.com%'
       AND p."imageUrl" NOT LIKE '%cdn.a2zoutletstore.com/uploads%'
       AND p."imageUrl" NOT LIKE '%/uploads/%'
-      AND p."imageUrl" NOT LIKE '/uploads%';
+      AND p."imageUrl" NOT LIKE '/uploads%'
+      AND p."imageUrl" NOT LIKE '%.avif%';
   `);
   console.log(`Pass 3 variants updated: ${pass3Result}`);
 
