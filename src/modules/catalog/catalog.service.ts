@@ -3912,6 +3912,7 @@ export class CatalogService {
    * বাহ্যিক ইমেজ URLs লোকাল মিডিয়া লাইব্রেরিতে ডাউনলোড করে প্রডাক্ট আপডেট করা
    */
   async ingestProductImages(productId: string) {
+    if (process.env.AUTO_INGEST_PRODUCT_IMAGES !== 'true') return { success: true, message: 'Auto image ingestion disabled to preserve direct CDN URLs' };
     const product = await this.prisma.product.findUnique({
       where: { id: productId },
       include: { variants: true },
