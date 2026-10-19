@@ -3912,7 +3912,7 @@ export class CatalogService {
    * বাহ্যিক ইমেজ URLs লোকাল মিডিয়া লাইব্রেরিতে ডাউনলোড করে প্রডাক্ট আপডেট করা
    */
   async ingestProductImages(productId: string) {
-    if (process.env.AUTO_INGEST_PRODUCT_IMAGES !== 'true') return { success: true, message: 'Auto image ingestion disabled to preserve direct CDN URLs' };
+    if (process.env.AUTO_INGEST_PRODUCT_IMAGES !== 'true') return { success: true, message: 'Auto image ingestion disabled to preserve direct CDN URLs', ingestedCount: 0 };
     const product = await this.prisma.product.findUnique({
       where: { id: productId },
       include: { variants: true },
@@ -4064,7 +4064,7 @@ export class CatalogService {
         const res = await this.ingestProductImages(id);
         if (res.success) {
           processed++;
-          totalImages += res.ingestedCount;
+          totalImages += (res.ingestedCount || 0);
         }
       } catch (err: any) {
         this.logger.warn(`Bulk image ingestion failed for product ${id}: ${err?.message}`);
